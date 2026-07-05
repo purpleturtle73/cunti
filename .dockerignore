@@ -1,0 +1,14 @@
+node_modules
+.svelte-kit
+build
+data
+data-demo
+tmp
+.venv
+.git
+.github
+.claude
+*.log
+*.db*
+README.md
+IMPLEMENTATION.md

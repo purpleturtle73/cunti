@@ -1,0 +1,32 @@
+const eur = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' });
+const eur0 = new Intl.NumberFormat('it-IT', {
+	style: 'currency',
+	currency: 'EUR',
+	maximumFractionDigits: 0
+});
+const num = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 6 });
+
+export function fmtEur(v: number | null | undefined, compact = false): string {
+	if (v == null || !Number.isFinite(v)) return '—';
+	return compact ? eur0.format(v) : eur.format(v);
+}
+
+export function fmtPct(v: number | null | undefined, signed = true): string {
+	if (v == null || !Number.isFinite(v)) return '—';
+	const s = (v * 100).toLocaleString('it-IT', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+	return (signed && v > 0 ? '+' : '') + s + '%';
+}
+
+export function fmtQty(v: number): string {
+	return num.format(v);
+}
+
+export function fmtDate(day: string): string {
+	const [y, m, d] = day.split('-');
+	return `${d}/${m}/${y}`;
+}
+
+export function signClass(v: number | null | undefined): string {
+	if (v == null || v === 0) return '';
+	return v > 0 ? 'pos' : 'neg';
+}

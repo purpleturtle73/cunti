@@ -1,0 +1,27 @@
+# dipendenze e build
+node_modules/
+.svelte-kit/
+build/
+vite.config.ts.timestamp-*
+
+# dati personali: MAI su GitHub (repo pubblico)
+data/
+data-demo/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+
+# file temporanei, screenshot, log
+tmp/
+*.log
+*.png
+nohup.out
+
+# ambiente locale
+claude-home/
+.venv/
+.env
+.env.*
+.claude/
+.DS_Store
