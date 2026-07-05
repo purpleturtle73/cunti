@@ -140,3 +140,7 @@ Deploy: Podman Quadlet con `AutoUpdate=registry` (vedi README).
 
 ### 2026-07-05 — Repo definitivo
 - Placeholder `OWNER/REPO` sostituiti con `purpleturtle73/cunti` in README (immagine ghcr, Quadlet, podman run). Il workflow CI usa già `${{ github.repository }}`, nessuna modifica necessaria lì.
+
+### 2026-07-05 — Fix CI: svelte-check falliva su GitHub Actions
+- Causa: `.svelte-kit/` è generato (gitignored) e in locale esisteva già da build precedenti; in CI, checkout pulito → `tsconfig.json` estende `./.svelte-kit/tsconfig.json` inesistente → `svelte-check` falliva subito (`Cannot read file`).
+- Fix: aggiunto script `prepare: svelte-kit sync` in `package.json` — `npm ci` lo esegue in automatico (hook npm standard) e rigenera `.svelte-kit/` prima di `npm run check`. Verificato in locale: `rm -rf .svelte-kit && npm ci` rigenera il file, `npm run check` → 0 errori.
