@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { db, priceHistory, type Instrument, type Transaction } from '$lib/server/db';
-import { buildPosition } from '$lib/server/portfolio';
+import { buildPosition, makeFxConverter } from '$lib/server/portfolio';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = ({ params }) => {
@@ -13,9 +13,11 @@ export const load: PageServerLoad = ({ params }) => {
 		.prepare('SELECT * FROM transactions WHERE instrument_id = ? ORDER BY date, id')
 		.all(instrument.id) as Transaction[];
 
-	const position = buildPosition(instrument, txs);
+	const toEur = makeFxConverter();
+	const position = buildPosition(instrument, txs, toEur);
+	const ccy = instrument.currency;
 
-	// daily value series for this position
+	// daily value series for this position (in EUR)
 	const history = priceHistory(instrument.id);
 	const series: { date: string; value: number; invested: number }[] = [];
 	if (txs.length > 0) {
@@ -31,16 +33,16 @@ export const load: PageServerLoad = ({ params }) => {
 				const tx = txs[i];
 				if (tx.type === 'buy') {
 					qty += tx.quantity;
-					invested += tx.quantity * tx.price + tx.fee;
+					invested += toEur(tx.quantity * tx.price + tx.fee, ccy, tx.date);
 				} else {
 					qty = Math.max(0, qty - tx.quantity);
-					invested -= tx.quantity * tx.price - tx.fee;
+					invested -= toEur(tx.quantity * tx.price - tx.fee, ccy, tx.date);
 				}
 				i++;
 			}
 			const px = history.get(day);
 			if (px != null) lastPx = px;
-			series.push({ date: day, value: qty * lastPx, invested });
+			series.push({ date: day, value: toEur(qty * lastPx, ccy, day), invested });
 			d.setUTCDate(d.getUTCDate() + 1);
 			day = d.toISOString().slice(0, 10);
 		}

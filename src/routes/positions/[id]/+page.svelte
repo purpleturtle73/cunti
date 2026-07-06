@@ -1,11 +1,12 @@
 <script lang="ts">
 	import AreaChart from '$lib/components/AreaChart.svelte';
 	import StatTile from '$lib/components/StatTile.svelte';
-	import { fmtDate, fmtEur, fmtPct, fmtQty, signClass } from '$lib/format';
+	import { fmtCurrency, fmtDate, fmtEur, fmtPct, fmtQty, signClass } from '$lib/format';
 
 	let { data } = $props();
 	let p = $derived(data.position);
 	let inst = $derived(data.instrument);
+	let ccy = $derived(inst.currency);
 </script>
 
 <svelte:head><title>Cunti — {inst.name}</title></svelte:head>
@@ -26,7 +27,7 @@
 
 <section class="tiles">
 	<StatTile label="Valore attuale" value={fmtEur(p.value, true)} sub="{fmtQty(p.quantity)} quote" />
-	<StatTile label="PMC (commissioni incl.)" value={fmtEur(p.avgCost)} sub="prezzo attuale {fmtEur(p.lastPrice)}{p.lastPriceDate ? ' · ' + fmtDate(p.lastPriceDate) : ''}" />
+	<StatTile label="PMC (commissioni incl.)" value={fmtCurrency(p.avgCost, ccy)} sub="prezzo attuale {fmtCurrency(p.lastPrice, ccy)}{p.lastPriceDate ? ' · ' + fmtDate(p.lastPriceDate) : ''}" />
 	<StatTile
 		label="P&L non realizzato"
 		value={fmtEur(p.unrealized, true)}
@@ -70,9 +71,9 @@
 							<td>{fmtDate(tx.date)}</td>
 							<td><span class={['side', tx.type]}>{tx.type === 'buy' ? 'Acquisto' : 'Vendita'}</span></td>
 							<td class="num">{fmtQty(tx.quantity)}</td>
-							<td class="num">{fmtEur(tx.price)}</td>
-							<td class="num">{fmtEur(tx.fee)}</td>
-							<td class="num">{fmtEur(tx.quantity * tx.price + (tx.type === 'buy' ? tx.fee : -tx.fee))}</td>
+							<td class="num">{fmtCurrency(tx.price, ccy)}</td>
+							<td class="num">{fmtCurrency(tx.fee, ccy)}</td>
+							<td class="num">{fmtCurrency(tx.quantity * tx.price + (tx.type === 'buy' ? tx.fee : -tx.fee), ccy)}</td>
 							<td class="notes-cell">{tx.notes ?? ''}</td>
 						</tr>
 					{/each}

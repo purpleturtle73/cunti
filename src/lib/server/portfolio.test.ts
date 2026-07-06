@@ -6,16 +6,21 @@ import type { Transaction } from './db';
 process.env.DATA_DIR = 'tmp/test-data';
 fs.rmSync('tmp/test-data', { recursive: true, force: true });
 
-const { db, upsertPrices } = await import('./db');
-const { buildPosition, buildSnapshot } = await import('./portfolio');
+const { db, upsertPrices, upsertFxRates } = await import('./db');
+const { buildPosition, buildSnapshot, makeFxConverter } = await import('./portfolio');
 
-function insertInstrument(symbol: string, type: 'etf' | 'crypto', ter = 0.2): number {
+function insertInstrument(
+	symbol: string,
+	type: 'etf' | 'crypto',
+	ter = 0.2,
+	currency = 'EUR'
+): number {
 	return Number(
 		db
 			.prepare(
-				'INSERT INTO instruments (symbol, name, type, ter_pct, tax_rate_pct) VALUES (?, ?, ?, ?, 26)'
+				'INSERT INTO instruments (symbol, name, type, ter_pct, tax_rate_pct, currency) VALUES (?, ?, ?, ?, 26, ?)'
 			)
-			.run(symbol, symbol, type, ter).lastInsertRowid
+			.run(symbol, symbol, type, ter, currency).lastInsertRowid
 	);
 }
 
@@ -27,7 +32,7 @@ function tx(
 	price: number,
 	fee: number
 ): Transaction {
-	return { id: 0, instrument_id, type, date, quantity, price, fee, notes: null };
+	return { id: 0, instrument_id, type, date, quantity, price, fee, notes: null, broker_id: null };
 }
 
 let etfId: number;
@@ -80,6 +85,37 @@ describe('buildPosition — PMC con commissioni incluse', () => {
 		expect(p.quantity).toBe(0);
 		expect(p.avgCost).toBe(0);
 		expect(p.realizedTotal).toBeCloseTo(200);
+	});
+});
+
+describe('strumenti in USD — conversione EUR via EURUSD', () => {
+	it('makeFxConverter: carry-forward, backfill e identità per EUR', () => {
+		upsertFxRates('EURUSD', [
+			{ date: '2026-01-02', close: 1.25 },
+			{ date: '2026-02-02', close: 1.1 }
+		]);
+		const toEur = makeFxConverter();
+		expect(toEur(100, 'EUR', '2026-01-15')).toBe(100); // EUR: identità
+		expect(toEur(125, 'USD', '2026-01-02')).toBeCloseTo(100); // 125 / 1,25
+		expect(toEur(125, 'USD', '2026-01-20')).toBeCloseTo(100); // carry-forward
+		expect(toEur(110, 'USD', '2026-03-01')).toBeCloseTo(100); // ultimo noto 1,10
+		expect(toEur(125, 'USD', '2025-06-01')).toBeCloseTo(100); // backfill col primo
+	});
+
+	it('buildPosition: PMC in USD, aggregati in EUR al cambio della data', () => {
+		const usdId = insertInstrument('democoin', 'crypto', 0, 'USD');
+		upsertPrices(usdId, [
+			{ date: '2026-01-02', close: 1000 }, // USD
+			{ date: '2026-02-02', close: 1100 }
+		]);
+		const toEur = makeFxConverter(); // EURUSD: 1,25 poi 1,10 (dal test precedente)
+		const inst = db.prepare('SELECT * FROM instruments WHERE id = ?').get(usdId) as never;
+		const p = buildPosition(inst, [tx(usdId, 'buy', '2026-01-02', 1, 1000, 0)], toEur);
+		expect(p.avgCost).toBeCloseTo(1000); // PMC display: USD
+		expect(p.invested).toBeCloseTo(800); // 1000 / 1,25 EUR
+		expect(p.costBasis).toBeCloseTo(800);
+		expect(p.value).toBeCloseTo(1000); // 1100 USD / 1,10 EUR
+		expect(p.unrealized).toBeCloseTo(200); // guadagno prezzo + guadagno cambio
 	});
 });
 

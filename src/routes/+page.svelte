@@ -3,13 +3,28 @@
 	import Bars from '$lib/components/Bars.svelte';
 	import Donut from '$lib/components/Donut.svelte';
 	import StatTile from '$lib/components/StatTile.svelte';
-	import { fmtDate, fmtEur, fmtPct, signClass } from '$lib/format';
+	import { fmtCurrency, fmtDate, fmtEur, fmtPct, signClass } from '$lib/format';
 
 	let { data } = $props();
 	let snap = $derived(data.snapshot);
 	let tax = $derived(data.tax);
 
 	let selected = $state('1y');
+
+	// Marker operazioni sul grafico: nessuno / solo ETF (PAC) / solo crypto / tutte
+	type MarkerFilter = 'none' | 'etf' | 'crypto' | 'all';
+	let markerFilter = $state<MarkerFilter>('none');
+	const MARKER_OPTIONS: { key: MarkerFilter; label: string }[] = [
+		{ key: 'none', label: 'Nessuna' },
+		{ key: 'etf', label: 'ETF' },
+		{ key: 'crypto', label: 'Crypto' },
+		{ key: 'all', label: 'Tutte' }
+	];
+	let chartMarkers = $derived(
+		markerFilter === 'none'
+			? []
+			: data.txMarkers.filter((m) => markerFilter === 'all' || m.assetType === markerFilter)
+	);
 
 	const PERIOD_DAYS: Record<string, number | 'ytd' | 'max'> = {
 		'1w': 7,
@@ -68,14 +83,31 @@
 
 <svelte:head><title>Cunti — Dashboard</title></svelte:head>
 
+{#snippet speseRow()}
+	{#if data.spese}
+		<section class="spese-row">
+			<h2 class="row-title"><a href="/spese">Spese →</a></h2>
+			<div class="tiles-inner">
+				<StatTile label="Uscite del mese" value={fmtEur(data.spese.monthOut)} tone={data.spese.monthOut > 0 ? 'neg' : 'neutral'} />
+				<StatTile label="Entrate del mese" value={fmtEur(data.spese.monthIn)} tone={data.spese.monthIn > 0 ? 'pos' : 'neutral'} />
+				<StatTile label="Saldo {data.spese.curYear}" value={fmtEur(data.spese.ytdNet)} tone={data.spese.ytdNet >= 0 ? 'pos' : 'neg'} sub="entrate − uscite, giroconti esclusi" />
+				{#if data.spese.topCat}
+					<StatTile label="Top categoria del mese" value={data.spese.topCat} />
+				{/if}
+			</div>
+		</section>
+	{/if}
+{/snippet}
+
 {#if snap.positions.length === 0}
 	<section class="onboarding card">
 		<h1>Benvenuto in Cunti</h1>
 		<p>
-			Per iniziare: <a href="/instruments">aggiungi gli strumenti</a> (ETF di Borsa Italiana o crypto),
+			Per iniziare: <a href="/admin">aggiungi gli strumenti</a> (ETF di Borsa Italiana o crypto),
 			poi <a href="/transactions">registra i tuoi acquisti</a>. I prezzi si aggiornano da soli ogni 6 ore.
 		</p>
 	</section>
+	{@render speseRow()}
 {:else}
 	<header class="hero">
 		<div>
@@ -107,13 +139,34 @@
 	<section class="card chart-card">
 		<div class="chart-head">
 			<h2>Andamento</h2>
-			{#if selectedStat && selectedStat.abs != null}
-				<span class={['tabular', 'chart-abs', signClass(selectedStat.abs)]}>
-					{fmtEur(selectedStat.abs)} nel periodo
-				</span>
-			{/if}
+			<div class="chart-tools">
+				<span class="tools-label">Operazioni:</span>
+				<div class="seg" role="group" aria-label="Mostra operazioni sul grafico">
+					{#each MARKER_OPTIONS as opt (opt.key)}
+						<button
+							type="button"
+							class={['seg-btn', { active: markerFilter === opt.key }]}
+							aria-pressed={markerFilter === opt.key}
+							onclick={() => (markerFilter = opt.key)}
+						>
+							{opt.label}
+						</button>
+					{/each}
+				</div>
+				{#if selectedStat && selectedStat.abs != null}
+					<span class={['tabular', 'chart-abs', signClass(selectedStat.abs)]}>
+						{fmtEur(selectedStat.abs)} nel periodo
+					</span>
+				{/if}
+			</div>
 		</div>
-		<AreaChart points={chartPoints} height={320} />
+		<AreaChart points={chartPoints} height={320} markers={chartMarkers} />
+		{#if chartMarkers.length > 0}
+			<div class="marker-legend">
+				<span><i class="dot buy"></i>Acquisto</span>
+				<span><i class="dot sell"></i>Vendita</span>
+			</div>
+		{/if}
 	</section>
 
 	<section class="tiles">
@@ -146,6 +199,8 @@
 			sub="{snap.bestDay ? fmtDate(snap.bestDay.date) : '—'} · {snap.worstDay ? fmtDate(snap.worstDay.date) : '—'}"
 		/>
 	</section>
+
+	{@render speseRow()}
 
 	<section class="grid-2">
 		<div class="card">
@@ -254,8 +309,8 @@
 							<td><a class="pos-link" href="/positions/{p.instrument.id}">{p.instrument.name}</a></td>
 							<td><span class="badge {p.instrument.type}">{p.instrument.type}</span></td>
 							<td class="num">{p.quantity.toLocaleString('it-IT', { maximumFractionDigits: 6 })}</td>
-							<td class="num">{fmtEur(p.avgCost)}</td>
-							<td class="num">{fmtEur(p.lastPrice)}</td>
+							<td class="num">{fmtCurrency(p.avgCost, p.instrument.currency)}</td>
+							<td class="num">{fmtCurrency(p.lastPrice, p.instrument.currency)}</td>
 							<td class="num">{fmtEur(p.value)}</td>
 							<td class="num">{fmtPct(snap.totalValue > 0 ? p.value / snap.totalValue : null, false)}</td>
 							<td class={['num', signClass(p.unrealized)]}>{fmtEur(p.unrealized)}</td>
@@ -360,10 +415,71 @@
 	.chart-head {
 		display: flex;
 		justify-content: space-between;
-		align-items: baseline;
+		align-items: center;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+	.chart-tools {
+		display: flex;
+		align-items: center;
+		gap: 0.7rem;
+		flex-wrap: wrap;
+	}
+	.tools-label {
+		font-size: 0.75rem;
+		color: var(--ink-3);
+	}
+	.seg {
+		display: inline-flex;
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		overflow: hidden;
+	}
+	.seg-btn {
+		background: var(--surface);
+		border: none;
+		color: var(--ink-2);
+		font: inherit;
+		font-size: 0.72rem;
+		font-weight: 600;
+		padding: 0.32rem 0.65rem;
+		cursor: pointer;
+	}
+	.seg-btn + .seg-btn {
+		border-left: 1px solid var(--border);
+	}
+	.seg-btn:hover {
+		color: var(--ink);
+	}
+	.seg-btn.active {
+		background: linear-gradient(120deg, rgba(57, 135, 229, 0.18), rgba(144, 133, 233, 0.14));
+		color: var(--ink);
 	}
 	.chart-abs {
 		font-size: 0.85rem;
+	}
+	.marker-legend {
+		display: flex;
+		gap: 1.4rem;
+		margin-top: 0.5rem;
+		font-size: 0.78rem;
+		color: var(--ink-2);
+	}
+	.marker-legend span {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+	}
+	.marker-legend .dot {
+		width: 10px;
+		height: 10px;
+		border-radius: 999px;
+	}
+	.marker-legend .dot.buy {
+		background: var(--good);
+	}
+	.marker-legend .dot.sell {
+		background: var(--bad);
 	}
 
 	.tiles {
@@ -374,6 +490,27 @@
 	}
 	@media (max-width: 1100px) {
 		.tiles {
+			grid-template-columns: repeat(2, 1fr);
+		}
+	}
+
+	.spese-row {
+		margin-bottom: 1rem;
+	}
+	.row-title {
+		font-size: 0.95rem;
+		margin: 0 0 0.6rem;
+	}
+	.row-title a:hover {
+		color: var(--accent);
+	}
+	.tiles-inner {
+		display: grid;
+		grid-template-columns: repeat(4, 1fr);
+		gap: 0.8rem;
+	}
+	@media (max-width: 1100px) {
+		.tiles-inner {
 			grid-template-columns: repeat(2, 1fr);
 		}
 	}

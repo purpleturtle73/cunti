@@ -11,6 +11,20 @@ export function fmtEur(v: number | null | undefined, compact = false): string {
 	return compact ? eur0.format(v) : eur.format(v);
 }
 
+const currencyFmt = new Map<string, Intl.NumberFormat>();
+
+/** Formato valuta generico, sempre locale it-IT (es. USD → "1.234,56 USD"). */
+export function fmtCurrency(v: number | null | undefined, currency = 'EUR'): string {
+	if (currency === 'EUR') return fmtEur(v);
+	if (v == null || !Number.isFinite(v)) return '—';
+	let f = currencyFmt.get(currency);
+	if (!f) {
+		f = new Intl.NumberFormat('it-IT', { style: 'currency', currency, currencyDisplay: 'code' });
+		currencyFmt.set(currency, f);
+	}
+	return f.format(v);
+}
+
 export function fmtPct(v: number | null | undefined, signed = true): string {
 	if (v == null || !Number.isFinite(v)) return '—';
 	const s = (v * 100).toLocaleString('it-IT', { maximumFractionDigits: 2, minimumFractionDigits: 2 });

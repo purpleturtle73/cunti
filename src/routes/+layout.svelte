@@ -22,7 +22,8 @@
 	const nav = [
 		{ href: '/', label: 'Dashboard', icon: 'M4 19 10 12 14 15 20 6M20 6v5M20 6h-5' },
 		{ href: '/transactions', label: 'Transazioni', icon: 'M4 8h13M13 4l4 4-4 4M20 16H7M11 12l-4 4 4 4' },
-		{ href: '/instruments', label: 'Strumenti', icon: 'M12 3v18M5 8c2 0 3-2 7-2s5 2 7 2M5 16c2 0 3-2 7-2s5 2 7 2' }
+		{ href: '/spese', label: 'Spese', icon: 'M3 7h18v13H3zM3 11h18M7 16h4' },
+		{ href: '/admin', label: 'Amministrazione', icon: 'M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1' }
 	];
 
 	let lastRefreshLabel = $derived(
@@ -70,13 +71,6 @@
 				</a>
 			{/each}
 
-			<span class="nav-item disabled" title="In arrivo: tracciamento spese personali">
-				<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-					<path d="M3 7h18v13H3zM3 11h18M7 16h4" />
-				</svg>
-				Spese
-				<em>presto</em>
-			</span>
 		</nav>
 
 		<div class="side-footer">
@@ -148,25 +142,6 @@
 		color: var(--ink);
 		box-shadow: inset 0 0 0 1px rgba(57, 135, 229, 0.35);
 	}
-	.nav-item.disabled {
-		color: var(--ink-3);
-		cursor: default;
-	}
-	.nav-item.disabled:hover {
-		background: none;
-		color: var(--ink-3);
-	}
-	.nav-item em {
-		margin-left: auto;
-		font-style: normal;
-		font-size: 0.62rem;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		border: 1px solid var(--border-strong);
-		border-radius: 999px;
-		padding: 0.1rem 0.45rem;
-	}
-
 	.side-footer {
 		margin-top: auto;
 		display: flex;
@@ -181,9 +156,7 @@
 
 	main {
 		padding: 2rem 2.4rem 4rem;
-		max-width: 1280px;
 		width: 100%;
-		margin: 0 auto;
 		min-width: 0;
 	}
 

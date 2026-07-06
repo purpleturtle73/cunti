@@ -9,6 +9,10 @@ Tracker di portafoglio per investitore italiano: ETF di Borsa Italiana (PAC mens
 - **Dashboard**: valore del portafoglio, andamento con selettore periodo (1S / 1M / 3M / 6M / YTD / 1A / MAX, rendimento TWR al netto dei flussi), P&L lordo e **netto stimato dopo le imposte**, rendimento annualizzato, max drawdown, miglior/peggior giorno, commissioni totali, costo TER annuo, allocazione, flussi mensili del PAC.
 - **Fisco (stime)**: 26% su plusvalenze ETF in regime amministrato (aliquota configurabile per strumento), crypto in regime dichiarativo (26% fino al 2025, 33% dal 2026 — L. 207/2024), imposta di bollo 0,2%, IVAFE 0,2%, riepilogo del realizzato per anno.
 - **Dettaglio posizione** con storico, operazioni e plusvalenze realizzate.
+- **Broker**: ogni operazione può essere associata a un broker (configurabili, con logo, dal pannello di amministrazione).
+- **Valute**: locale italiano ovunque; strumenti quotati in EUR o USD (tipicamente le crypto) — i valori USD sono convertiti in EUR al cambio EURUSD del giorno per totali e stime fiscali.
+- **Marker operazioni sul grafico**: i momenti di acquisto/vendita (PAC, crypto) sono visualizzabili come punti sul grafico del portafoglio, filtrabili (nessuna / ETF / crypto / tutte).
+- **Backup automatici** almeno una volta al giorno con rotazione a 10 giorni; pannello di **amministrazione** per backup manuali, download, ripristino (anche da file caricato) e gestione broker.
 - Sezione **Spese** predisposta nella navigazione (in arrivo: tracker di finanze personali).
 
 > Le stime fiscali sono indicative e non costituiscono consulenza. Le minusvalenze da ETF non compensano le plusvalenze da ETF (redditi di capitale vs redditi diversi).
@@ -19,9 +23,9 @@ Dettagli di implementazione, calcoli e test: [IMPLEMENTATION.md](IMPLEMENTATION.
 
 L'immagine è pubblicata su GitHub Container Registry: `ghcr.io/purpleturtle73/cunti:latest` (release specifica: `:1.2.3`).
 
-Il database SQLite vive in `/data/cunti.db` (volume `cunti-data`): per il backup basta copiare quel file.
+Il database SQLite vive in `/data/cunti.db` (volume `cunti-data`); i backup automatici in `/data/backups`. Al primo avvio il DB parte vuoto (per dati di prova vedi [Dati demo](#dati-demo)).
 
-**Primo avvio**: senza un database esistente, il container genera automaticamente **dati demo** per provare subito l'interfaccia (dettagli nella sezione [Dati demo](#dati-demo)). Per un'installazione reale parti con DB vuoto impostando `SEED_DEMO=0`, come negli esempi qui sotto. Un DB già presente non viene mai toccato.
+L'immagine include un **healthcheck** (`/api/health`, ogni 30 s): `podman ps` mostra lo stato `healthy`/`unhealthy` del container.
 
 ### Podman Quadlet (consigliato — Rocky Linux o qualsiasi distro con systemd)
 
@@ -37,7 +41,8 @@ AutoUpdate=registry
 PublishPort=3030:3030
 Volume=cunti-data:/data
 Environment=TZ=Europe/Rome
-Environment=SEED_DEMO=0
+# systemd considera il servizio avviato solo quando l'healthcheck passa
+Notify=healthy
 
 [Service]
 Restart=always
@@ -74,11 +79,8 @@ Per una prova veloce senza systemd:
 podman run -d --name cunti \
   -p 3030:3030 \
   -v cunti-data:/data \
-  -e SEED_DEMO=0 \
   ghcr.io/purpleturtle73/cunti:latest
 ```
-
-Ometti `-e SEED_DEMO=0` per avere i dati demo al primo avvio.
 
 ### Locale con npm (senza container)
 
@@ -90,13 +92,14 @@ npm run build
 DATA_DIR=./data PORT=3030 node build/index.js
 ```
 
-Il DB viene creato in `$DATA_DIR/cunti.db` (default `./data`). Per popolare l'istanza con i dati demo, prima dell'avvio: `DATA_DIR=./data npm run seed:demo`.
+Il DB viene creato in `$DATA_DIR/cunti.db` (default `./data`).
 
 ## Uso
 
-1. **Strumenti** → aggiungi ogni ETF con il ticker Yahoo (es. `SWDA.MI`), ISIN, TER e aliquota; le crypto con l'ID CoinGecko (es. `bitcoin`). Alla creazione viene scaricato lo storico prezzi completo (per le crypto max 365 giorni: limite dell'API gratuita CoinGecko).
-2. **Transazioni** → registra acquisti e vendite con quantità, prezzo e commissioni.
-3. **Dashboard** → tutto il resto è calcolato.
+1. **Strumenti** → aggiungi ogni ETF con il ticker Yahoo (es. `SWDA.MI`), ISIN, TER, aliquota e valuta (EUR o USD); le crypto con l'ID CoinGecko (es. `bitcoin`). Alla creazione viene scaricato lo storico prezzi completo (per le crypto max 365 giorni: limite dell'API gratuita CoinGecko).
+2. **Amministrazione** → configura i broker (nome + logo) e gestisci i backup: esecuzione manuale, download, ripristino da lista o da file caricato. I backup girano comunque da soli almeno una volta al giorno, con rotazione a 10 giorni.
+3. **Transazioni** → registra acquisti e vendite con quantità, prezzo, commissioni e broker (prezzi nella valuta dello strumento).
+4. **Dashboard** → tutto il resto è calcolato; col filtro "Operazioni" vedi i punti di acquisto/vendita sul grafico.
 
 ## Sviluppo
 
@@ -107,23 +110,24 @@ npm run check            # type-check
 npm test                 # unit test (vitest)
 ```
 
-Stack: SvelteKit (Svelte 5) + adapter-node, SQLite (better-sqlite3), grafici SVG custom. Variabili: `DATA_DIR` (default `./data`), `PORT` (default `3030` in produzione), `SEED_DEMO` (solo container, default `1`).
+Stack: SvelteKit (Svelte 5) + adapter-node, SQLite (better-sqlite3), grafici SVG custom. Variabili: `DATA_DIR` (default `./data`), `PORT` (default `3030` in produzione).
 
 ### Dati demo
 
-[`scripts/seed-demo.js`](scripts/seed-demo.js) genera un portafoglio finto ma realistico: 2 ETF + Bitcoin, ~2 anni di prezzi sintetici (random walk deterministico, riproducibile), un PAC mensile di 18 rate, acquisti crypto sparsi e una vendita (per testare le plusvalenze realizzate). Le date sono relative a oggi, quindi il seed produce sempre un portafoglio "attuale".
-
-Come viene usato:
-
-- **Nel container**: l'entrypoint (`entrypoint.sh`) lo esegue automaticamente all'avvio **solo se** in `/data` non c'è già `cunti.db`; con `SEED_DEMO=0` viene saltato e l'app parte con DB vuoto. Un DB esistente non viene mai modificato.
-- **In sviluppo**, su un DB separato per non sporcare quello reale:
+[`scripts/make-demo-db.js`](scripts/make-demo-db.js) genera un database demo **separato** con dati generici: 2 ETF (EUR) + una crypto (USD), ~2 anni di prezzi sintetici e cambio EURUSD (random walk deterministico, riproducibile), 2 broker con logo, un PAC mensile di 18 rate, acquisti crypto sparsi e una vendita. Le date sono relative a oggi.
 
 ```sh
-DATA_DIR=./tmp/demo-data npm run seed:demo
-DATA_DIR=./tmp/demo-data npm run dev
+npm run demo:db                      # crea ./data/demo-cunti.db
+DATA_DIR=./tmp/demo npm run demo:db  # oppure in un'altra DATA_DIR
 ```
 
-Il seed è idempotente: rieseguirlo su un DB già popolato non duplica le transazioni (aggiorna solo i prezzi sintetici).
+Il file prodotto è `DATA_DIR/demo-cunti.db`; se esiste già, lo script **chiede conferma** prima di sovrascrivere. È pensato per l'uso manuale: per provarlo nell'app copialo come `cunti.db` nella `DATA_DIR` scelta, es.
+
+```sh
+DATA_DIR=./tmp/demo npm run demo:db
+cp tmp/demo/demo-cunti.db tmp/demo/cunti.db
+DATA_DIR=./tmp/demo npm run dev
+```
 
 ### Immagine container e release
 

@@ -7,11 +7,18 @@
 		invested?: number;
 	}
 
+	interface Marker {
+		date: string;
+		type: 'buy' | 'sell';
+		label: string;
+	}
+
 	let {
 		points,
 		height = 300,
-		showInvested = true
-	}: { points: Point[]; height?: number; showInvested?: boolean } = $props();
+		showInvested = true,
+		markers = []
+	}: { points: Point[]; height?: number; showInvested?: boolean; markers?: Marker[] } = $props();
 
 	const PAD = { top: 14, right: 14, bottom: 28, left: 62 };
 
@@ -81,6 +88,40 @@
 
 	let hover = $derived(hoverIdx != null && plot ? { p: points[hoverIdx], px: plot.x(hoverIdx), py: plot.y(points[hoverIdx].value) } : null);
 	let tipRight = $derived(hover != null && width > 0 && hover.px > width * 0.62);
+
+	// Marker operazioni: raggruppati per giorno e ancorati al punto della serie
+	let markerDots = $derived.by(() => {
+		if (!plot || markers.length === 0) return [];
+		const idxByDate = new Map(points.map((p, i) => [p.date, i]));
+		const byDay = new Map<string, { buys: Marker[]; sells: Marker[] }>();
+		for (const m of markers) {
+			if (!idxByDate.has(m.date)) continue; // fuori dal periodo visualizzato
+			const g = byDay.get(m.date) ?? { buys: [], sells: [] };
+			(m.type === 'buy' ? g.buys : g.sells).push(m);
+			byDay.set(m.date, g);
+		}
+		const out: { x: number; y: number; type: 'buy' | 'sell'; title: string }[] = [];
+		for (const [date, g] of byDay) {
+			const i = idxByDate.get(date)!;
+			const px = plot.x(i);
+			const py = plot.y(points[i].value);
+			if (g.buys.length > 0)
+				out.push({
+					x: px,
+					y: py,
+					type: 'buy',
+					title: `${fmtDate(date)}\n${g.buys.map((m) => 'Acquisto ' + m.label).join('\n')}`
+				});
+			if (g.sells.length > 0)
+				out.push({
+					x: px,
+					y: py - (g.buys.length > 0 ? 9 : 0),
+					type: 'sell',
+					title: `${fmtDate(date)}\n${g.sells.map((m) => 'Vendita ' + m.label).join('\n')}`
+				});
+		}
+		return out;
+	});
 </script>
 
 <div class="wrap" bind:clientWidth={width} style:height="{height}px">
@@ -122,6 +163,19 @@
 				onpointermove={onMove}
 				onpointerleave={() => (hoverIdx = null)}
 			/>
+
+			{#each markerDots as m (m.type + m.x + m.y)}
+				<circle
+					cx={m.x}
+					cy={m.y}
+					r="4"
+					class={['marker', m.type]}
+					stroke="var(--surface)"
+					stroke-width="1.5"
+				>
+					<title>{m.title}</title>
+				</circle>
+			{/each}
 		</svg>
 
 		{#if hover}
@@ -154,6 +208,12 @@
 		fill: var(--ink-3);
 		font-size: 11px;
 		font-variant-numeric: tabular-nums;
+	}
+	.marker.buy {
+		fill: var(--good);
+	}
+	.marker.sell {
+		fill: var(--bad);
 	}
 	.tooltip {
 		position: absolute;

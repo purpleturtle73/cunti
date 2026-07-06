@@ -1,4 +1,5 @@
 import { building } from '$app/environment';
+import { startBackupScheduler } from '$lib/server/backup';
 import { startScheduler } from '$lib/server/prices';
 
 declare global {
@@ -9,4 +10,5 @@ declare global {
 if (!building && !globalThis.__priceScheduler) {
 	globalThis.__priceScheduler = true;
 	startScheduler();
+	startBackupScheduler();
 }

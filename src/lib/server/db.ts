@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const DATA_DIR = process.env.DATA_DIR ?? path.resolve('data');
+export const DATA_DIR = process.env.DATA_DIR ?? path.resolve('data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 export const db = new Database(path.join(DATA_DIR, 'cunti.db'));
@@ -45,7 +45,47 @@ CREATE TABLE IF NOT EXISTS settings (
 	key TEXT PRIMARY KEY,
 	value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS brokers (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	name TEXT NOT NULL UNIQUE,
+	logo BLOB,
+	logo_mime TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS fx_rates (
+	pair TEXT NOT NULL,
+	date TEXT NOT NULL,
+	rate REAL NOT NULL,
+	PRIMARY KEY (pair, date)
+);
+
+CREATE TABLE IF NOT EXISTS cards (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	name TEXT NOT NULL UNIQUE,
+	logo BLOB,
+	logo_mime TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS expenses (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	date TEXT NOT NULL,
+	description TEXT NOT NULL,
+	card TEXT NOT NULL DEFAULT 'conto',
+	amount REAL NOT NULL,
+	category TEXT NOT NULL DEFAULT 'unknown'
+);
+CREATE INDEX IF NOT EXISTS idx_exp_date ON expenses(date);
+CREATE INDEX IF NOT EXISTS idx_exp_category ON expenses(category, date);
+CREATE INDEX IF NOT EXISTS idx_exp_card ON expenses(card, date);
 `);
+
+// Migrazione: broker_id su transactions (DB creati prima dei broker)
+const txCols = (db.pragma('table_info(transactions)') as { name: string }[]).map((c) => c.name);
+if (!txCols.includes('broker_id'))
+	db.exec('ALTER TABLE transactions ADD COLUMN broker_id INTEGER REFERENCES brokers(id) ON DELETE SET NULL');
 
 export interface Instrument {
 	id: number;
@@ -67,6 +107,23 @@ export interface Transaction {
 	price: number;
 	fee: number;
 	notes: string | null;
+	broker_id: number | null;
+}
+
+export interface Broker {
+	id: number;
+	name: string;
+	logo_mime: string | null;
+	has_logo: 0 | 1;
+}
+
+export interface Expense {
+	id: number;
+	date: string; // YYYY-MM-DD
+	description: string;
+	card: string;
+	amount: number; // firmato: <0 uscita, >0 entrata
+	category: string;
 }
 
 export function getSetting(key: string): string | null {
@@ -90,12 +147,81 @@ export function allTransactions(): Transaction[] {
 	return db.prepare('SELECT * FROM transactions ORDER BY date, id').all() as Transaction[];
 }
 
+export type NewTransaction = Omit<Transaction, 'id'>;
+
+/** Inserisce solo le transazioni non già presenti nel DB.
+ *  Chiave di duplicato: strumento + tipo + data + quantità + prezzo + commissioni
+ *  (note e broker esclusi di proposito: la stessa operazione annotata diversamente resta un doppione).
+ *  Il controllo avviene dentro la transazione SQLite, quindi vengono scartati anche i doppioni interni al batch. */
+export function insertTransactionsDedup<T extends NewTransaction>(
+	rows: T[]
+): { inserted: T[]; duplicates: T[] } {
+	const exists = db.prepare(
+		'SELECT 1 FROM transactions WHERE instrument_id = ? AND type = ? AND date = ? AND quantity = ? AND price = ? AND fee = ?'
+	);
+	const insert = db.prepare(
+		'INSERT INTO transactions (instrument_id, type, date, quantity, price, fee, notes, broker_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+	);
+	const inserted: T[] = [];
+	const duplicates: T[] = [];
+	db.transaction(() => {
+		for (const r of rows) {
+			if (exists.get(r.instrument_id, r.type, r.date, r.quantity, r.price, r.fee)) {
+				duplicates.push(r);
+			} else {
+				insert.run(r.instrument_id, r.type, r.date, r.quantity, r.price, r.fee, r.notes, r.broker_id);
+				inserted.push(r);
+			}
+		}
+	})();
+	return { inserted, duplicates };
+}
+
 /** Price map per instrument: date (YYYY-MM-DD) -> close. */
 export function priceHistory(instrumentId: number): Map<string, number> {
 	const rows = db
 		.prepare('SELECT date, close FROM prices WHERE instrument_id = ? ORDER BY date')
 		.all(instrumentId) as { date: string; close: number }[];
 	return new Map(rows.map((r) => [r.date, r.close]));
+}
+
+export function allBrokers(): Broker[] {
+	return db
+		.prepare(
+			'SELECT id, name, logo_mime, (logo IS NOT NULL) AS has_logo FROM brokers ORDER BY name'
+		)
+		.all() as Broker[];
+}
+
+export interface Card {
+	id: number;
+	name: string;
+	logo_mime: string | null;
+	has_logo: 0 | 1;
+}
+
+export function allCards(): Card[] {
+	return db
+		.prepare('SELECT id, name, logo_mime, (logo IS NOT NULL) AS has_logo FROM cards ORDER BY name')
+		.all() as Card[];
+}
+
+/** FX series: date (YYYY-MM-DD) -> rate (units of quote currency per 1 EUR, e.g. EURUSD ~1.08). */
+export function fxHistory(pair: string): Map<string, number> {
+	const rows = db
+		.prepare('SELECT date, rate FROM fx_rates WHERE pair = ? ORDER BY date')
+		.all(pair) as { date: string; rate: number }[];
+	return new Map(rows.map((r) => [r.date, r.rate]));
+}
+
+export function upsertFxRates(pair: string, rows: { date: string; close: number }[]) {
+	const stmt = db.prepare(
+		'INSERT INTO fx_rates (pair, date, rate) VALUES (?, ?, ?) ON CONFLICT(pair, date) DO UPDATE SET rate = excluded.rate'
+	);
+	const insertMany = db.transaction((items: { date: string; close: number }[]) => {
+		for (const r of items) stmt.run(pair, r.date, r.close);
+	});
+	insertMany(rows);
 }
 
 export function upsertPrices(instrumentId: number, rows: { date: string; close: number }[]) {

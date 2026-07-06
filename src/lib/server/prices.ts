@@ -1,4 +1,13 @@
-import { allInstruments, getSetting, setSetting, upsertPrices, type Instrument } from './db';
+import {
+	allInstruments,
+	fxHistory,
+	getSetting,
+	setSetting,
+	upsertFxRates,
+	upsertPrices,
+	type Instrument
+} from './db';
+import { log, logError } from './log';
 
 // UA minimale: quelli browser completi vengono spesso bloccati (429) da Yahoo
 const UA = 'Mozilla/5.0';
@@ -33,9 +42,13 @@ async function fetchYahoo(symbol: string, range: string): Promise<{ date: string
 	return out;
 }
 
-/** CoinGecko daily closes in EUR. Public API caps history at 365 days. */
-async function fetchCoinGecko(id: string, days: number): Promise<{ date: string; close: number }[]> {
-	const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}/market_chart?vs_currency=eur&days=${days}&interval=daily`;
+/** CoinGecko daily closes in the requested currency. Public API caps history at 365 days. */
+async function fetchCoinGecko(
+	id: string,
+	days: number,
+	vs = 'eur'
+): Promise<{ date: string; close: number }[]> {
+	const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}/market_chart?vs_currency=${vs}&days=${days}&interval=daily`;
 	const res = await fetch(url, { headers: { 'User-Agent': UA } });
 	if (!res.ok) throw new Error(`CoinGecko ${id}: HTTP ${res.status}`);
 	const json = await res.json();
@@ -47,11 +60,24 @@ async function fetchCoinGecko(id: string, days: number): Promise<{ date: string;
 }
 
 export async function refreshInstrument(inst: Instrument, full: boolean): Promise<number> {
+	// I prezzi vengono scaricati nella valuta dello strumento (Yahoo quota nella
+	// valuta nativa del ticker; per CoinGecko si passa vs_currency).
 	const rows =
 		inst.type === 'crypto'
-			? await fetchCoinGecko(inst.symbol, full ? 365 : 7)
+			? await fetchCoinGecko(inst.symbol, full ? 365 : 7, inst.currency.toLowerCase())
 			: await fetchYahoo(inst.symbol, full ? 'max' : '10d');
 	upsertPrices(inst.id, rows);
+	return rows.length;
+}
+
+/** Cambio EURUSD (Yahoo "EURUSD=X", USD per 1 EUR) — serve per convertire in EUR
+ *  gli strumenti quotati in USD. Storico completo al primo giro, poi incrementale. */
+export async function refreshFx(): Promise<number> {
+	const needsFx = allInstruments().some((i) => i.currency !== 'EUR');
+	if (!needsFx) return 0;
+	const full = fxHistory('EURUSD').size === 0;
+	const rows = await fetchYahoo('EURUSD=X', full ? 'max' : '10d');
+	upsertFxRates('EURUSD', rows);
 	return rows.length;
 }
 
@@ -63,22 +89,41 @@ export interface RefreshReport {
 let refreshing = false;
 
 export async function refreshAll(full = false): Promise<RefreshReport> {
-	if (refreshing) return { at: new Date().toISOString(), results: [] };
+	if (refreshing) {
+		log('prices', 'refresh già in corso, richiesta ignorata');
+		return { at: new Date().toISOString(), results: [] };
+	}
 	refreshing = true;
 	const report: RefreshReport = { at: new Date().toISOString(), results: [] };
+	const instruments = allInstruments();
+	log('prices', `refresh ${full ? 'completo' : 'incrementale'} di ${instruments.length} strumenti…`);
 	try {
-		for (const inst of allInstruments()) {
+		try {
+			const points = await refreshFx();
+			if (points > 0) {
+				report.results.push({ symbol: 'EURUSD', ok: true, points });
+				log('prices', `EURUSD: ${points} punti`);
+			}
+		} catch (e) {
+			report.results.push({ symbol: 'EURUSD', ok: false, error: String(e) });
+			logError('prices', 'EURUSD fallito', e);
+		}
+		for (const inst of instruments) {
 			try {
 				const points = await refreshInstrument(inst, full);
 				report.results.push({ symbol: inst.symbol, ok: true, points });
+				log('prices', `${inst.symbol}: ${points} punti`);
 			} catch (e) {
 				report.results.push({ symbol: inst.symbol, ok: false, error: String(e) });
+				logError('prices', `${inst.symbol} fallito`, e);
 			}
 			// stay well under CoinGecko/Yahoo rate limits
 			await new Promise((r) => setTimeout(r, 1500));
 		}
 		setSetting('last_refresh', report.at);
 		setSetting('last_refresh_report', JSON.stringify(report.results));
+		const failed = report.results.filter((r) => !r.ok).length;
+		log('prices', `refresh completato: ${report.results.length - failed} ok, ${failed} falliti`);
 	} finally {
 		refreshing = false;
 	}
@@ -91,6 +136,7 @@ const SIX_HOURS = 6 * 60 * 60 * 1000;
 export function startScheduler() {
 	const last = getSetting('last_refresh');
 	const stale = !last || Date.now() - Date.parse(last) > SIX_HOURS;
-	if (stale) void refreshAll().catch((e) => console.error('refresh failed', e));
-	setInterval(() => void refreshAll().catch((e) => console.error('refresh failed', e)), SIX_HOURS);
+	log('prices', `scheduler avviato (ultimo refresh: ${last ?? 'mai'}${stale ? ', stantio → refresh subito' : ''})`);
+	if (stale) void refreshAll().catch((e) => logError('prices', 'refresh fallito', e));
+	setInterval(() => void refreshAll().catch((e) => logError('prices', 'refresh fallito', e)), SIX_HOURS);
 }

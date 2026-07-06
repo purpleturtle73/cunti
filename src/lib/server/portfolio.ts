@@ -1,10 +1,41 @@
 import {
 	allInstruments,
 	allTransactions,
+	fxHistory,
 	priceHistory,
 	type Instrument,
 	type Transaction
 } from './db';
+
+/** Converte un importo dalla valuta dello strumento in EUR al cambio della data. */
+export type ToEur = (amount: number, currency: string, date: string) => number;
+
+const identityToEur: ToEur = (amount) => amount;
+
+/** Converter EUR basato sulla serie EURUSD (USD per 1 EUR): eur = usd / rate.
+ *  Cambio carry-forward (ultimo noto ≤ data), backfill col primo per date più vecchie.
+ *  Senza dati FX degrada a identità (nessuna conversione). */
+export function makeFxConverter(): ToEur {
+	const hist = fxHistory('EURUSD');
+	if (hist.size === 0) return identityToEur;
+	const dates = [...hist.keys()]; // già ordinate per data
+	const rates = dates.map((d) => hist.get(d)!);
+	const rateOn = (date: string): number => {
+		if (date <= dates[0]) return rates[0];
+		let lo = 0;
+		let hi = dates.length - 1;
+		while (lo < hi) {
+			const mid = (lo + hi + 1) >> 1;
+			if (dates[mid] <= date) lo = mid;
+			else hi = mid - 1;
+		}
+		return rates[lo];
+	};
+	return (amount, currency, date) => {
+		if (currency === 'EUR' || amount === 0) return amount;
+		return amount / rateOn(date);
+	};
+}
 
 export interface RealizedEvent {
 	date: string;
@@ -12,10 +43,12 @@ export interface RealizedEvent {
 	proceeds: number;
 }
 
+/** avgCost e lastPrice sono nella valuta dello strumento (per la visualizzazione);
+ *  tutti gli aggregati (costBasis, value, unrealized, realized, invested, …) sono in EUR. */
 export interface Position {
 	instrument: Instrument;
 	quantity: number;
-	avgCost: number; // PMC: prezzo medio di carico, commissioni incluse
+	avgCost: number; // PMC: prezzo medio di carico, commissioni incluse (valuta strumento)
 	costBasis: number;
 	lastPrice: number | null;
 	lastPriceDate: string | null;
@@ -74,28 +107,40 @@ function addDays(day: string, n: number): string {
 	return d.toISOString().slice(0, 10);
 }
 
-export function buildPosition(instrument: Instrument, txs: Transaction[]): Position {
+export function buildPosition(
+	instrument: Instrument,
+	txs: Transaction[],
+	toEur: ToEur = identityToEur
+): Position {
+	const ccy = instrument.currency;
 	let quantity = 0;
-	let avgCost = 0;
+	let avgCost = 0; // PMC in valuta strumento (display)
+	let avgCostEur = 0; // PMC in EUR al cambio delle date di acquisto (aggregati e fisco)
 	let feesPaid = 0;
 	let invested = 0;
 	let divested = 0;
 	const realizedEvents: RealizedEvent[] = [];
 
 	for (const tx of txs) {
-		feesPaid += tx.fee;
+		feesPaid += toEur(tx.fee, ccy, tx.date);
 		if (tx.type === 'buy') {
 			const cost = tx.quantity * tx.price + tx.fee;
-			avgCost = quantity + tx.quantity > 0 ? (quantity * avgCost + cost) / (quantity + tx.quantity) : 0;
-			quantity += tx.quantity;
-			invested += cost;
+			const costEur = toEur(cost, ccy, tx.date);
+			const newQty = quantity + tx.quantity;
+			avgCost = newQty > 0 ? (quantity * avgCost + cost) / newQty : 0;
+			avgCostEur = newQty > 0 ? (quantity * avgCostEur + costEur) / newQty : 0;
+			quantity = newQty;
+			invested += costEur;
 		} else {
-			const proceeds = tx.quantity * tx.price - tx.fee;
-			const gain = proceeds - tx.quantity * avgCost;
+			const proceeds = toEur(tx.quantity * tx.price - tx.fee, ccy, tx.date);
+			const gain = proceeds - tx.quantity * avgCostEur;
 			realizedEvents.push({ date: tx.date, gain, proceeds });
 			quantity = Math.max(0, quantity - tx.quantity);
 			divested += proceeds;
-			if (quantity === 0) avgCost = 0;
+			if (quantity === 0) {
+				avgCost = 0;
+				avgCostEur = 0;
+			}
 		}
 	}
 
@@ -107,8 +152,9 @@ export function buildPosition(instrument: Instrument, txs: Transaction[]): Posit
 		lastPriceDate = date;
 	}
 
-	const costBasis = quantity * avgCost;
-	const value = lastPrice != null ? quantity * lastPrice : costBasis;
+	const costBasis = quantity * avgCostEur;
+	const value =
+		lastPrice != null ? quantity * toEur(lastPrice, ccy, lastPriceDate ?? today()) : costBasis;
 	const unrealized = value - costBasis;
 	return {
 		instrument,
@@ -131,7 +177,11 @@ export function buildPosition(instrument: Instrument, txs: Transaction[]): Posit
 
 /** Daily portfolio series from first transaction to today, prices carried forward
  *  (and backfilled with the earliest known price for txs older than price history). */
-function buildSeries(instruments: Instrument[], txs: Transaction[]): DailyPoint[] {
+function buildSeries(
+	instruments: Instrument[],
+	txs: Transaction[],
+	toEur: ToEur = identityToEur
+): DailyPoint[] {
 	if (txs.length === 0) return [];
 	const start = txs[0].date;
 	const end = today();
@@ -169,10 +219,10 @@ function buildSeries(instruments: Instrument[], txs: Transaction[]): DailyPoint[
 				const tx = list[i];
 				if (tx.type === 'buy') {
 					qty.set(inst.id, (qty.get(inst.id) ?? 0) + tx.quantity);
-					flow += tx.quantity * tx.price + tx.fee;
+					flow += toEur(tx.quantity * tx.price + tx.fee, inst.currency, tx.date);
 				} else {
 					qty.set(inst.id, Math.max(0, (qty.get(inst.id) ?? 0) - tx.quantity));
-					flow -= tx.quantity * tx.price - tx.fee;
+					flow -= toEur(tx.quantity * tx.price - tx.fee, inst.currency, tx.date);
 				}
 				i++;
 			}
@@ -184,7 +234,7 @@ function buildSeries(instruments: Instrument[], txs: Transaction[]): DailyPoint[
 		let value = 0;
 		for (const inst of instruments) {
 			const q = qty.get(inst.id) ?? 0;
-			if (q > 0) value += q * (lastKnown.get(inst.id) ?? 0);
+			if (q > 0) value += q * toEur(lastKnown.get(inst.id) ?? 0, inst.currency, day);
 		}
 
 		investedCum += flow;
@@ -235,6 +285,7 @@ function periodStats(series: DailyPoint[]): PeriodStat[] {
 export function buildSnapshot(): PortfolioSnapshot {
 	const instruments = allInstruments();
 	const txs = allTransactions();
+	const toEur = makeFxConverter();
 	const txByInstrument = new Map<number, Transaction[]>();
 	for (const tx of txs) {
 		if (!txByInstrument.has(tx.instrument_id)) txByInstrument.set(tx.instrument_id, []);
@@ -242,10 +293,10 @@ export function buildSnapshot(): PortfolioSnapshot {
 	}
 
 	const positions = instruments
-		.map((inst) => buildPosition(inst, txByInstrument.get(inst.id) ?? []))
+		.map((inst) => buildPosition(inst, txByInstrument.get(inst.id) ?? [], toEur))
 		.filter((p) => p.firstDate !== null);
 
-	const series = buildSeries(instruments, txs);
+	const series = buildSeries(instruments, txs, toEur);
 	const totalValue = positions.reduce((s, p) => s + p.value, 0);
 	const totalInvested = positions.reduce((s, p) => s + p.invested - p.divested, 0);
 	const unrealizedTotal = positions.reduce((s, p) => s + p.unrealized, 0);
@@ -279,12 +330,14 @@ export function buildSnapshot(): PortfolioSnapshot {
 		}
 	}
 
+	const ccyById = new Map(instruments.map((i) => [i.id, i.currency]));
 	const monthly = new Map<string, { invested: number; divested: number }>();
 	for (const tx of txs) {
 		const month = tx.date.slice(0, 7);
+		const ccy = ccyById.get(tx.instrument_id) ?? 'EUR';
 		const m = monthly.get(month) ?? { invested: 0, divested: 0 };
-		if (tx.type === 'buy') m.invested += tx.quantity * tx.price + tx.fee;
-		else m.divested += tx.quantity * tx.price - tx.fee;
+		if (tx.type === 'buy') m.invested += toEur(tx.quantity * tx.price + tx.fee, ccy, tx.date);
+		else m.divested += toEur(tx.quantity * tx.price - tx.fee, ccy, tx.date);
 		monthly.set(month, m);
 	}
 	const monthlyFlows = [...monthly.entries()]

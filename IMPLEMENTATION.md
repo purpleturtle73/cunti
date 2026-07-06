@@ -18,11 +18,13 @@ Documento di riferimento dell'implementazione. **Va tenuto aggiornato a ogni mod
 ```
 src/
   hooks.server.ts              avvia lo scheduler prezzi (guard anti doppio-init)
-  lib/format.ts                formattazione it-IT (EUR, %, date, quantità)
+  lib/format.ts                formattazione it-IT (EUR, valute generiche, %, date, quantità)
   lib/server/
-    db.ts                      schema + helper SQLite (instruments, transactions, prices, settings)
-    prices.ts                  fetcher Yahoo/CoinGecko, refreshAll, scheduler 6h
-    portfolio.ts               motore: posizioni (PMC), serie giornaliera, TWR, periodi, drawdown
+    db.ts                      schema + helper SQLite (instruments, transactions, prices, brokers, fx_rates, settings)
+    prices.ts                  fetcher Yahoo/CoinGecko (valuta strumento), FX EURUSD, refreshAll, scheduler 6h
+    portfolio.ts               motore: posizioni (PMC), serie giornaliera, TWR, periodi, drawdown, conversione EUR
+    backup.ts                  backup/restore SQLite, rotazione 10gg, scheduler giornaliero
+    txcsv.ts                   parser CSV import transazioni (puro, testabile)
     tax.ts                     stime fiscali italiane
     *.test.ts                  unit test vitest
   lib/components/
@@ -31,24 +33,84 @@ src/
     Bars.svelte                flussi mensili PAC (investito/disinvestito)
     StatTile.svelte            tile statistica
   routes/
-    +page.svelte               dashboard (hero, pill periodi, tiles, fisco, posizioni)
-    transactions/              CRUD transazioni (form actions)
-    instruments/               CRUD strumenti + download storico alla creazione
+    +page.svelte               dashboard (hero, pill periodi, marker operazioni, tiles, fisco, posizioni)
+    transactions/              CRUD transazioni + modifica inline, duplica, import/export CSV
+    spese/                     tracker spese: dashboard, movimenti, import a due fasi, categorie/regole
+    instruments/               solo redirect 301 → /admin (gestione spostata lì)
     positions/[id]/            dettaglio posizione
+    admin/                     amministrazione: strumenti, backup/restore, broker, report refresh
     api/refresh/+server.ts     POST refresh prezzi manuale
-scripts/seed-demo.js           dati demo con prezzi sintetici (DB separato via DATA_DIR)
-entrypoint.sh                  avvio container: seed demo se DB assente (vedi sotto)
+    api/health/+server.ts      healthcheck (SELECT 1 sul DB)
+    api/backups/[name]/        GET download backup
+    api/brokers/[id]/logo/     GET logo broker (BLOB dal DB)
+scripts/make-demo-db.js        genera DATA_DIR/demo-cunti.db con dati generici (uso manuale)
 ```
 
-### Avvio container e dati demo
+### Backup e restore
 
-L'immagine include `scripts/seed-demo.js` e parte da `entrypoint.sh`:
+- Motore in `lib/server/backup.ts`, cartella `DATA_DIR/backups`.
+- **Creazione**: SQLite online backup API (`db.backup()`), consistente anche con WAL; nome `cunti-YYYYMMDD-HHmmssSSS.db` (millisecondi per evitare collisioni).
+- **Scheduler**: controllo orario, backup se l'ultimo (`settings.last_backup`) ha più di 24h → almeno 1/giorno anche con container riavviati.
+- **Rotazione**: alla creazione si eliminano i backup **automatici** più vecchi di 10 giorni; i file caricati a mano (`upload-*.db`) non vengono toccati.
+- **Restore**: `ATTACH` del file + transazione unica: `DELETE` di tutte le tabelle e `INSERT … SELECT` copiando solo le **colonne in comune** (un backup con schema più vecchio resta ripristinabile); `defer_foreign_keys` durante la copia, checkpoint WAL alla fine. Prima del restore viene creato un backup di sicurezza dello stato corrente.
+- **Sicurezza**: nomi validati con regex + verifica che il path risolto stia in `backups/` (no traversal); il file viene aperto e verificato (tabelle attese) prima del restore. Upload limitato a `.db`.
+- Pannello in `/admin`: backup manuale, lista con dimensione/data, download, ripristino (con conferma), eliminazione, upload di un file da ripristinare.
 
-- nessun `cunti.db` in `DATA_DIR` → genera i dati demo, poi avvia l'app (primo avvio sempre "popolato" per il test);
-- DB già presente → nessun seed, il DB non viene mai toccato;
-- `SEED_DEMO=0` → salta il seed e parte con DB vuoto (deploy reale).
+### Transazioni: modifica inline, duplica, import CSV
 
-Il seed è idempotente: schema con `CREATE TABLE IF NOT EXISTS`, strumenti `INSERT OR IGNORE`, transazioni inserite solo se la tabella è vuota, prezzi in upsert.
+- **Modifica inline**: nella tabella storico ogni riga ha ✎ che la trasforma in riga di input (tutti i campi: data, strumento, tipo, broker, quantità, prezzo, commissioni, note). Tecnica: un unico `<form id="edit-tx">` vuoto fuori dalla tabella + attributo HTML `form="edit-tx"` sugli input nelle celle (un `<form>` non può avvolgere un `<tr>`). Salva → action `update`; ✕ annulla.
+- **Duplica** (⧉): action `duplicate` copia il record (`INSERT … SELECT`) e apre subito la copia in modifica inline (l'action ritorna `duplicatedId`).
+- **Import CSV** (con deduplica): action `import` + parser puro `txcsv.ts`. Header obbligatorio `data;strumento;tipo;quantita;prezzo` (opzionali `commissioni`, `broker`, `note`); separatore `;` o `,` autodetect; date `YYYY-MM-DD` o `DD/MM/YYYY`; decimali con virgola o punto (gestiti separatori migliaia); `strumento` = simbolo esistente (case-insensitive), `broker` = nome esistente; `tipo` = buy/sell/acquisto/vendita; campi quotati e BOM Excel gestiti. Con errori di formato (riportati riga per riga) non viene inserito nulla. Limite file 2 MB.
+- **Deduplica import** (`insertTransactionsDedup` in db.ts): chiave di duplicato = strumento + tipo + data + quantità + prezzo + commissioni (note e broker esclusi di proposito). Le righe già presenti nel DB vengono saltate e segnalate con il numero di riga; il controllo gira dentro la transazione SQLite, quindi elimina anche i doppioni interni al file. Reimportare lo stesso CSV è idempotente.
+- Validazione condivisa `readTxForm()` tra `create` e `update` (controlli esistenza strumento/broker, date non future lato CSV, numeri finiti).
+
+### Eliminazione strumento
+
+Cascata (transazioni + prezzi) protetta su due livelli: doppia `confirm` client (la seconda esplicita sul numero di transazioni) e guardia server — l'action `delete` rifiuta con 400 se lo strumento ha transazioni e manca `force=1` (impostato solo dopo la seconda conferma).
+
+### Logging e diagnostica
+
+- `lib/server/log.ts`: `log`/`logError` su stdout/stderr con timestamp ISO e scope (`[prices]`, `[import]`, `[instruments]`).
+- Eventi loggati: avvio scheduler, inizio/esito refresh per simbolo (incluso errore Yahoo/CoinGecko per ticker inesistenti), esito import CSV (inserite/saltate/rifiutato), creazione strumento (punti scaricati o download fallito), eliminazione strumento.
+- **Dove leggerli**: sviluppo → terminale di `npm run dev`; container → `podman logs -f cunti` o, con Quadlet, `journalctl --user -u cunti.service -f`.
+- **In-app**: `/admin` mostra il report dell'ultimo refresh (`settings.last_refresh_report`): simbolo, esito, punti scaricati, errore.
+
+### Valute (EUR/USD)
+
+- `instruments.currency` (`EUR` default, `USD` selezionabile): prezzi e transazioni dello strumento sono nella sua valuta (CoinGecko: `vs_currency`; Yahoo quota nella valuta nativa del ticker).
+- Serie cambio **EURUSD** da Yahoo (`EURUSD=X`, USD per 1 EUR) in tabella `fx_rates`, aggiornata nel refresh solo se esistono strumenti non-EUR; `eur = usd / rate`.
+- `makeFxConverter()` (portfolio.ts): rate carry-forward (ultimo ≤ data), backfill col primo per date precedenti, identità senza dati FX.
+- Motore: PMC tenuto **doppio** — in valuta strumento (display) e in EUR al cambio delle date di acquisto (aggregati e fisco, coerente col criterio fiscale italiano); serie giornaliera e flussi convertiti al cambio del giorno. Tutti i totali/graﬁci/fisco sono in EUR; PMC e prezzo nelle tabelle sono nella valuta dello strumento (`fmtCurrency`, locale sempre it-IT).
+
+### Broker
+
+- Tabella `brokers` (nome unico, logo BLOB + mime, max 512 KB, PNG/JPEG/SVG/WebP); `transactions.broker_id` con `ON DELETE SET NULL` (migrazione via `pragma table_info` per DB esistenti).
+- CRUD nel pannello `/admin` (creazione con logo, cambio logo, eliminazione); selezione broker (opzionale) nel form transazioni; logo servito da `/api/brokers/[id]/logo`.
+
+### Healthcheck
+
+- `GET /api/health` → `SELECT 1` sul DB, 200/500.
+- `HEALTHCHECK` nel Containerfile (fetch da Node ogni 30s, start-period 15s); nel Quadlet `Notify=healthy` fa dichiarare "avviato" il servizio systemd solo a healthcheck superato.
+
+### Spese (tracker finanze personali)
+
+Dettagli di progetto in PLAN_SPESE.md; stato: M1–M3 implementate (2026-07-06).
+
+- **Dati**: tabella `expenses` (date, description, card, amount firmato, category TEXT libera); indici su data/categoria/card. Unica tabella nuova: regole e proprietà categorie stanno su **file di testo** in `DATA_DIR`.
+- **Regole**: `categories.json` (formato storico `{categoria: [keyword…]}`, riletto a ogni uso) — `categorize.ts` replica lo script Python: substring case-insensitive, keyword più lunga vince, categoria esplicita del CSV vince sempre; keyword con metacaratteri regex segnalate (mai matchate). `categories-meta.json` (gestito da UI, editabile a mano): icona, colore, flag `transfer` (giroconti esclusi dai totali).
+- **Import a due fasi** (`expenses.ts`): parse (`expensecsv.ts`: colonne minime data_ops/descrizione/importo; card/moneyin/moneyout/categoria opzionali — le derivate vengono solo validate; extra ignorate; card di default da form) → categorizzazione → **staging su file** (`DATA_DIR/import-staging/<token>.json`, TTL 1h) → anteprima con: nuove/duplicate/categorizzate per fonte, **conflitti di categoria** (stessa chiave, categoria diversa) con scelta per riga DB/CSV → conferma applica in transazione unica. **Dedup a conteggio**: chiave data+descrizione+card+importo, si inseriscono solo le occorrenze mancanti (doppioni legittimi preservati, reimport idempotente).
+- **Round-trip**: export CSV (`/api/expenses/export`) nello stesso formato dell'import (moneyin/moneyout ricalcolate); "Svuota spese" con conferma testuale ELIMINA + backup automatico pre-wipe. Ciclo: export → edit a mano → wipe → reimport.
+- **Divisione UI**: `/spese` = consultazione (tiles, grafici, movimenti con categoria inline, export); **/admin** = gestione (import CSV, categorie, regole, card, svuota). Chips dei filtri attivi sopra i grafici con ✕ per filtro e "Mostra tutto"; parametro `anno` esplicito (`?anno=` vuoto = tutti gli anni, altrimenti default = anno più recente).
+- **Esclusioni dai totali**: flag "Escludi dai totali" per categoria (chiave `transfer` in `categories-meta.json`) — copre giroconti (`investimenti`, `ignore`) e doppi conteggi (`carte_credito` = totale carta già presente come voci singole). Le voci restano nei movimenti ma spariscono da entrate/uscite/saldo/grafici.
+- **Card/conti** (tabella `cards`, come i broker): nome unico = valore del campo `card` nel CSV + logo BLOB (Mastercard/Visa/banca), CRUD in /admin, logo servito da `/api/cards/[id]/logo` e mostrato nei movimenti; eliminazione non tocca le spese (join per nome).
+- **Gestione (in /admin)**: pannello categorie (icona da set predefinito `expense-icons.ts`, flag esclusione, **rinomina con propagazione** a DB+categories.json+meta), strumenti regole (test descrizione, retro-applicazione alle unknown con anteprima, **report utilizzo keyword** con match e ultimo utilizzo — per pulizia file).
+- **Dashboard** `/spese`: tiles (uscite/entrate mese, saldo YTD, top categoria), barre per anno cliccabili (`InOutBars.svelte`, entrate vs uscite, esclusioni applicate), dettaglio anno per mese, donut uscite per categoria e classifica con Δ vs stesso periodo anno precedente (anche su tutto lo storico). **Home**: riga tile spese (snippet renderizzato sia con che senza investimenti) con link a `/spese`.
+- **Backup**: `createBackup()` copia anche `categories.json`/`categories-meta.json` in `backups/` (ultima copia, sovrascritta); i due file sono fuori dal DB quindi non inclusi nei `.db`.
+- **Export investimenti**: `/api/transactions/export` — CSV nello stesso formato dell'import transazioni (round-trip anche lì); bottone in pagina Transazioni.
+
+### Dati demo
+
+`scripts/make-demo-db.js` (npm `demo:db`): genera `DATA_DIR/demo-cunti.db` **separato dall'app** con dati generici (2 ETF EUR, 1 crypto USD, 2 broker con logo SVG, PAC 18 rate, vendita crypto, prezzi e EURUSD sintetici deterministici, date relative a oggi). Se il file esiste chiede conferma (senza TTY: annulla). Nessun seed automatico nel container: per usarlo si copia manualmente come `cunti.db`.
 
 ## Calcoli finanziari
 
@@ -71,7 +133,7 @@ Il seed è idempotente: schema con `CREATE TABLE IF NOT EXISTS`, strumenti `INSE
 ## Prezzi
 
 - **Yahoo Finance** (ETF `.MI`, EUR): endpoint `v8/finance/chart`, range `max` al primo download, `10d` agli aggiornamenti. Gotcha: User-Agent da browser completo → 429; si usa `Mozilla/5.0` minimale + fallback query1→query2→query1 con pausa 4s sui 429.
-- **CoinGecko** (crypto, `vs_currency=eur`): `market_chart`, max **365 giorni** con l'API gratuita.
+- **CoinGecko** (crypto, `vs_currency` = valuta dello strumento): `market_chart`, max **365 giorni** con l'API gratuita.
 - Scheduler: refresh all'avvio se più vecchio di 6h, poi ogni 6h; 1,5s di pausa tra strumenti (rate limit); lock anti-sovrapposizione; report in `settings.last_refresh_report`.
 
 ## Sicurezza / rete
@@ -84,7 +146,12 @@ Il seed è idempotente: schema con `CREATE TABLE IF NOT EXISTS`, strumenti `INSE
 ### Unit test (vitest — `npm test`, eseguiti in CI)
 
 - `src/lib/server/tax.test.ts` (pure, senza DB): aliquota crypto per anno (26/33), imposte latenti al 26% e con aliquota custom 12,5%, nessuna imposta su posizioni in perdita, compensazione gains/losses crypto nello stesso anno, **non**-compensazione minusvalenze ETF, bollo/IVAFE/TER, netProfit = lordo − imposte.
-- `src/lib/server/portfolio.test.ts` (DB SQLite isolato in `tmp/test-data`): PMC con commissioni incluse, vendita (plusvalenza vs PMC, PMC invariato), azzeramento posizione, `buildSnapshot` (totali, serie giornaliera, flussi, TWR di periodo, P&L assoluto).
+- `src/lib/server/portfolio.test.ts` (DB SQLite isolato in `tmp/test-data`): PMC con commissioni incluse, vendita (plusvalenza vs PMC, PMC invariato), azzeramento posizione, `buildSnapshot` (totali, serie giornaliera, flussi, TWR di periodo, P&L assoluto); conversione USD→EUR (`makeFxConverter`: carry-forward/backfill/identità; `buildPosition`: PMC in USD, aggregati in EUR ai cambi delle date).
+- `src/lib/server/backup.test.ts` (DB isolato in `tmp/test-backup`): creazione backup (file valido, `last_backup`), rotazione oltre 10 giorni, validazione nomi (traversal), restore che riporta i dati allo stato del backup, rifiuto di file non-SQLite.
+- `src/lib/server/txcsv.test.ts` (puro): separatori `;`/`,`, decimali it/US con migliaia, date ISO e italiane, header con accenti/maiuscole, campi quotati, BOM, errori riga per riga (data/strumento/tipo/quantità/prezzo/broker invalidi, date future), colonne obbligatorie mancanti, file vuoto.
+- `src/lib/server/tximport.test.ts` (DB isolato in `tmp/test-import`): dedup contro il DB (reimport idempotente), dedup dei doppioni interni al batch, ogni campo chiave rende unica la riga, note/broker diversi non evitano il dedup.
+- `src/lib/server/expensecsv.test.ts` (puro): formato storico completo, formato grezzo minimo, header `data`, colonne extra ignorate, categoria vuota/unknown→null, incoerenza moneyin/moneyout, errori riga per riga, header senza colonne obbligatorie.
+- `src/lib/server/expenses.test.ts` (DB isolato in `tmp/test-expenses`): motore regole (longest-match case-insensitive, keyword regex sospette, json malformato, card default, categoria CSV che vince), import due fasi (nuovo→conferma, reimport idempotente, dedup a conteggio con terza occorrenza, conflitto risolto CSV e DB, token inesistente), export round-trip (reimport = tutto duplicato), wipe con backup + ripristino da reimport.
 
 ### Verifiche end-to-end svolte in sviluppo (2026-07-05)
 
@@ -105,9 +172,51 @@ Deploy: Podman Quadlet con `AutoUpdate=registry` (vedi README).
 
 ## Roadmap
 
-- **Sezione Spese** (tracker finanze personali): caricamento spese mensili con categorie. La nav ha già la voce disabilitata; il layout globale è pensato per ospitarla.
+- **Panoramica unificata**: home mista portafoglio+spese, dashboard investimenti spostata in `/investimenti` (design in PLAN_SPESE.md § "Panoramica unificata"); da fare dopo il collaudo con lo storico spese reale.
+- **Spese — rifiniture (M4)**: editor in-app di `categories.json`, budget mensile per categoria, note su movimento, azioni bulk sulla lista movimenti (piano in PLAN_SPESE.md).
 
 ## Changelog
+
+### 2026-07-07 — Decisione: panoramica unificata
+- Registrato in PLAN_SPESE.md il design della **panoramica unificata** (home mista portafoglio+spese, dashboard investimenti → `/investimenti`) e lo stato fatto/da fare del piano spese; roadmap allineata (panoramica, M4, collaudo storico reale, squash pre-push).
+
+### 2026-07-06 — Spese: esclusioni, card con logo, gestione in admin, chips filtri
+- **Esclusioni dai totali**: il flag per categoria (già `transfer` nel meta) ora è esposto come "Escludi dai totali" e copre giroconti (`investimenti`, `ignore`) e doppi conteggi (`carte_credito`); verificato e2e (saldo ignora le categorie flaggate).
+- **Card/conti con logo**: nuova tabella `cards` (nome = valore CSV, logo BLOB come i broker), CRUD in /admin, endpoint `/api/cards/[id]/logo`, logo accanto alla card nei movimenti.
+- **Riorganizzazione**: import CSV, categorie, regole e svuota spostati da /spese ad **/admin** (sezioni "Spese: …"); /spese resta consultazione (tiles, grafici, movimenti, export) con link "Gestione →".
+- **Filtri**: chips dei filtri attivi sopra i grafici (✕ per singolo filtro, "Mostra tutto"); `?anno=` vuoto esplicito = tutti gli anni; donut/classifica categorie visibili anche senza anno selezionato (tutto lo storico).
+- **Privacy repo**: sanificati PLAN_SPESE.md e `expensecsv.test.ts` (importi stipendio realistici → fittizi, rimossi codici carta e riferimenti nominali).
+- Verifiche: svelte-check 0 errori/0 warning, 48 test verdi, e2e (import via admin, flag esclusione via meta file, card con logo servito, chips renderizzate, saldo con esclusioni corretto).
+
+### 2026-07-06 — Sezione Spese (M1–M3) + export/import allineati
+- **Spese**: implementate M1–M3 del piano — tabella `expenses`, parser CSV bancario, regole keyword da `categories.json` (file di testo, semantica dello script Python storico), import a due fasi con anteprima e diff dei conflitti di categoria, dedup a conteggio, lista movimenti con filtri e categoria inline, pannello categorie (icone SVG, giroconto, rinomina con propagazione), test regole + retro-applicazione + report utilizzo keyword, dashboard (tiles, barre per anno/mese cliccabili, donut e classifica con Δ anno precedente), riga tile spese in home, nav attivata.
+- **Export/import allineati**: export CSV round-trip per spese (`/api/expenses/export`) e per transazioni investimenti (`/api/transactions/export`, bottone in pagina); "Svuota spese" con backup automatico per il ciclo export→edit→wipe→reimport.
+- **Backup**: i backup ora salvano anche l'ultima copia di `categories.json`/`categories-meta.json` in `backups/`.
+- Nuovi componenti: `InOutBars.svelte` (entrate/uscite generico, cliccabile), `CategoryIcon.svelte` + set icone `expense-icons.ts`.
+- Verifiche: svelte-check 0 errori 0 warning, **48 unit test verdi** (20 nuovi per spese), e2e completo su server dev (import storico con categorie → conferma; import grezzo con card di default → regole applicate; conflitto categoria risolto "usa CSV"; rename con propagazione; setMeta su file; export round-trip; wipe con backup e json copiati; tiles in home anche senza investimenti; filtri anno/mese).
+
+### 2026-07-06 — Icone tipo, riordino admin, piano Spese
+- **Transazioni**: icona colorata del tipo strumento accanto al nome (linea di trend blu = ETF, moneta viola = crypto), colori coerenti con i badge esistenti.
+- **Admin riordinato**: Strumenti → Broker (anagrafiche) → Ultimo aggiornamento prezzi (diagnostica) → Backup (manutenzione, in fondo).
+- **PLAN_SPESE.md**: piano della sezione Spese (decisione Cunti vs Grafana/Metabase, schema, import con dedup a conteggio, dashboard, milestone M1–M4). Rivisto due volte in giornata dopo analisi del flusso reale (script `categ.py` + `cat.json`): Cunti ingerisce il CSV pre-script (moneyin/moneyout/categoria opzionali e derivati); le regole keyword restano su **file di testo** `DATA_DIR/categories.json` (stesso formato attuale, fonte di verità, riletto a ogni import) con la stessa semantica dello script (substring case-insensitive, longest-match); la UI aggiunge validazione, report utilizzo keyword e test. Lo script Python non va ricreato. Terza revisione: import a due fasi con anteprima e diff dei conflitti di categoria, export CSV round-trip + "svuota spese" con backup per la modifica di massa via editor, icone/colore/flag giroconto per categoria in `categories-meta.json` gestito da UI, rinomina categoria con propagazione.
+- Verifiche: svelte-check 0 errori, 28 test verdi, e2e con dati demo (icone renderizzate 36 etf + 5 crypto, ordine sezioni admin corretto).
+
+### 2026-07-06 — Strumenti dentro Amministrazione
+- Pagina `/instruments` eliminata: gestione strumenti (form di creazione, tabella con TER/aliquota inline, eliminazione con doppia conferma) spostata come prima sezione di `/admin`; azioni rinominate `createInstrument`/`updateInstrument`/`deleteInstrument` con messaggi per sezione come backup/broker.
+- `/instruments` risponde 301 → `/admin` (bookmark); voce "Strumenti" rimossa dalla nav; link di onboarding (dashboard e transazioni) puntano a `/admin`.
+- Verifiche: svelte-check 0 errori, 28 test verdi, e2e (redirect 301, sezione presente, create con ticker inesistente → warning, update, delete).
+
+### 2026-07-06 — Dedup import, guardia delete strumento, logging
+- **Import CSV con deduplica** (sostituisce l'append cieco): righe identiche a transazioni esistenti (strumento+tipo+data+quantità+prezzo+commissioni) saltate e segnalate con numero di riga; dedup anche dei doppioni interni al file; reimport idempotente. Helper `insertTransactionsDedup` in db.ts + 4 unit test dedicati (`tximport.test.ts`).
+- **Eliminazione strumento**: doppia conferma client (la seconda esplicita: "verranno eliminate anche le N transazioni") + guardia server (400 senza `force=1` se esistono transazioni).
+- **Logging**: nuovo `lib/server/log.ts` (timestamp ISO + scope); log su refresh prezzi (per simbolo, errori ticker inesistenti), import CSV, creazione/eliminazione strumenti. Sezione "Ultimo aggiornamento prezzi" in `/admin` con il report per simbolo. Lettura log: `journalctl --user -u cunti.service -f` / `podman logs -f cunti` / terminale dev.
+- Verifiche: svelte-check 0 errori, 28 unit test verdi, autofixer pulito, e2e (doppio import stesso CSV → 0 nuove righe, delete senza force → 400, con force → cascata, log presenti, sezione admin visibile).
+
+### 2026-07-06 — Full width, import CSV, modifica inline, aliquota solo ETF
+- **Layout full width**: rimosso `max-width: 1280px` dal `<main>` del layout; tutte le pagine occupano l'intera larghezza.
+- **Transazioni**: import CSV in append (parser `txcsv.ts` + action `import`, tutto-o-niente con errori per riga), modifica inline di ogni riga (form esterno + attributo `form`), tasto duplica che apre subito la copia in modifica. Refactor validazione in `readTxForm()` condivisa tra create/update.
+- **Strumenti**: TER e aliquota editabili solo sulle righe ETF; per le crypto la cella aliquota mostra "auto" (l'aliquota crypto è per anno di realizzo in `tax.ts` e ignora `tax_rate_pct`). Il campo resta per gli ETF perché serve al caso whitelist titoli di stato (12,5%) — non derivabile dal tipo.
+- Verifiche: autofixer Svelte pulito, svelte-check 0 errori, 24 unit test verdi (6 nuovi per il CSV), e2e su server dev (import 200 con 2 righe inserite, update con decimali a virgola, duplicate identico, CSV con errore → 400 e zero righe importate).
 
 ### 2026-07-05 — v0.1, build iniziale
 - App completa: strumenti, transazioni, dashboard, dettaglio posizione, fisco, refresh prezzi automatico/manuale, design dark custom, seed demo.
@@ -137,6 +246,15 @@ Deploy: Podman Quadlet con `AutoUpdate=registry` (vedi README).
 
 ### 2026-07-05 — Porta 3030
 - Porta default cambiata da 3000 a 3030 (`ENV PORT` nel Containerfile, `EXPOSE`, README: esempi Quadlet/podman run/locale, firewall-cmd).
+
+### 2026-07-05 — Amministrazione, backup, broker, USD, marker, healthcheck
+- **Backup/restore**: motore `backup.ts` (online backup API, rotazione 10gg, scheduler ≥1/giorno con controllo orario), pannello `/admin` (manuale, download, upload, ripristino con backup di sicurezza preventivo), endpoint download; unit test dedicati.
+- **Broker**: tabella `brokers` con logo BLOB, `transactions.broker_id` (migrazione additiva su DB esistenti), CRUD in `/admin`, select nel form transazioni, logo in tabella via `/api/brokers/[id]/logo`.
+- **Valute**: `currency` per strumento (EUR/USD), serie `fx_rates` EURUSD da Yahoo, conversione in EUR nel motore (PMC doppio: valuta display + EUR fiscale); `fmtCurrency` it-IT. Locale numeri invariato (it-IT ovunque).
+- **Grafico**: marker acquisti/vendite sul grafico del portafoglio, filtro Nessuna/ETF/Crypto/Tutte, tooltip nativo con elenco operazioni del giorno, legenda.
+- **Healthcheck**: `/api/health` + `HEALTHCHECK` nel Containerfile; `Notify=healthy` nel Quadlet (README).
+- **Demo**: rimossi seed automatico ed entrypoint; nuovo `scripts/make-demo-db.js` (npm `demo:db`) che genera `demo-cunti.db` con conferma di sovrascrittura, uso manuale.
+- Verifiche: svelte-check 0 errori, 18 unit test verdi, e2e locale (route 200, backup automatico allo start, backup/restore/download via form actions, broker con logo via upload, transazione con broker, guard traversal 404, doppia esecuzione demo script rifiutata senza TTY).
 
 ### 2026-07-05 — Repo definitivo
 - Placeholder `OWNER/REPO` sostituiti con `purpleturtle73/cunti` in README (immagine ghcr, Quadlet, podman run). Il workflow CI usa già `${{ github.repository }}`, nessuna modifica necessaria lì.
