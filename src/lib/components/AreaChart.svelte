@@ -89,8 +89,17 @@
 	let hover = $derived(hoverIdx != null && plot ? { p: points[hoverIdx], px: plot.x(hoverIdx), py: plot.y(points[hoverIdx].value) } : null);
 	let tipRight = $derived(hover != null && width > 0 && hover.px > width * 0.62);
 
-	// Marker operazioni: raggruppati per giorno e ancorati al punto della serie
-	let markerDots = $derived.by(() => {
+	/** Triangolo centrato in (x, y): punta in alto per gli acquisti, in basso per le vendite. */
+	function triangle(x: number, y: number, up: boolean, s = 5): string {
+		return up
+			? `M${x.toFixed(1)},${(y - s).toFixed(1)}L${(x + s).toFixed(1)},${(y + s * 0.85).toFixed(1)}L${(x - s).toFixed(1)},${(y + s * 0.85).toFixed(1)}Z`
+			: `M${x.toFixed(1)},${(y + s).toFixed(1)}L${(x + s).toFixed(1)},${(y - s * 0.85).toFixed(1)}L${(x - s).toFixed(1)},${(y - s * 0.85).toFixed(1)}Z`;
+	}
+
+	// Marker operazioni: raggruppati per giorno, ancorati al punto della serie.
+	// Acquisti sotto la linea (triangolo su), vendite sopra (triangolo giù),
+	// con un trattino di collegamento al punto.
+	let markerMarks = $derived.by(() => {
 		if (!plot || markers.length === 0) return [];
 		const idxByDate = new Map(points.map((p, i) => [p.date, i]));
 		const byDay = new Map<string, { buys: Marker[]; sells: Marker[] }>();
@@ -100,25 +109,37 @@
 			(m.type === 'buy' ? g.buys : g.sells).push(m);
 			byDay.set(m.date, g);
 		}
-		const out: { x: number; y: number; type: 'buy' | 'sell'; title: string }[] = [];
+		const top = PAD.top + 7;
+		const bottom = height - PAD.bottom - 7;
+		const clamp = (v: number) => Math.max(top, Math.min(bottom, v));
+
+		const out: {
+			x: number;
+			y: number;
+			anchorY: number;
+			type: 'buy' | 'sell';
+			d: string;
+			title: string;
+		}[] = [];
 		for (const [date, g] of byDay) {
 			const i = idxByDate.get(date)!;
 			const px = plot.x(i);
 			const py = plot.y(points[i].value);
-			if (g.buys.length > 0)
+			const add = (type: 'buy' | 'sell', list: Marker[]) => {
+				const y = clamp(py + (type === 'buy' ? 13 : -13));
 				out.push({
 					x: px,
-					y: py,
-					type: 'buy',
-					title: `${fmtDate(date)}\n${g.buys.map((m) => 'Acquisto ' + m.label).join('\n')}`
+					y,
+					anchorY: py,
+					type,
+					d: triangle(px, y, type === 'buy'),
+					title: `${fmtDate(date)}\n${list
+						.map((m) => (type === 'buy' ? 'Acquisto ' : 'Vendita ') + m.label)
+						.join('\n')}`
 				});
-			if (g.sells.length > 0)
-				out.push({
-					x: px,
-					y: py - (g.buys.length > 0 ? 9 : 0),
-					type: 'sell',
-					title: `${fmtDate(date)}\n${g.sells.map((m) => 'Vendita ' + m.label).join('\n')}`
-				});
+			};
+			if (g.buys.length > 0) add('buy', g.buys);
+			if (g.sells.length > 0) add('sell', g.sells);
 		}
 		return out;
 	});
@@ -164,17 +185,12 @@
 				onpointerleave={() => (hoverIdx = null)}
 			/>
 
-			{#each markerDots as m (m.type + m.x + m.y)}
-				<circle
-					cx={m.x}
-					cy={m.y}
-					r="4"
-					class={['marker', m.type]}
-					stroke="var(--surface)"
-					stroke-width="1.5"
-				>
+			{#each markerMarks as m (m.type + m.x + m.y)}
+				<g class={['marker', m.type]}>
+					<line x1={m.x} x2={m.x} y1={m.anchorY} y2={m.y} stroke-width="1" opacity="0.55" />
+					<path d={m.d} stroke="var(--surface)" stroke-width="1.2" stroke-linejoin="round" />
 					<title>{m.title}</title>
-				</circle>
+				</g>
 			{/each}
 		</svg>
 
@@ -209,11 +225,17 @@
 		font-size: 11px;
 		font-variant-numeric: tabular-nums;
 	}
-	.marker.buy {
+	.marker.buy path {
 		fill: var(--good);
 	}
-	.marker.sell {
+	.marker.buy line {
+		stroke: var(--good);
+	}
+	.marker.sell path {
 		fill: var(--bad);
+	}
+	.marker.sell line {
+		stroke: var(--bad);
 	}
 	.tooltip {
 		position: absolute;

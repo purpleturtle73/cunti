@@ -41,6 +41,14 @@ AutoUpdate=registry
 PublishPort=3030:3030
 Volume=cunti-data:/data
 Environment=TZ=Europe/Rome
+# healthcheck esplicito nell'unit (non basta quello nell'immagine: Quadlet
+# valuta Notify=healthy alla creazione del container e con "sdnotify policy
+# healthy requires a healthcheck to be set" fallisce se non è dichiarato qui)
+HealthCmd=node -e "fetch('http://127.0.0.1:3030/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+HealthInterval=30s
+HealthTimeout=5s
+HealthStartPeriod=15s
+HealthRetries=3
 # systemd considera il servizio avviato solo quando l'healthcheck passa
 Notify=healthy
 

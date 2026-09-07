@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { db, priceHistory, type Instrument, type Transaction } from '$lib/server/db';
-import { buildPosition, makeFxConverter } from '$lib/server/portfolio';
+import { buildLots, buildPosition, makeFxConverter } from '$lib/server/portfolio';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = ({ params }) => {
@@ -15,6 +15,7 @@ export const load: PageServerLoad = ({ params }) => {
 
 	const toEur = makeFxConverter();
 	const position = buildPosition(instrument, txs, toEur);
+	const lots = buildLots(instrument, txs, toEur, position.lastPrice, position.lastPriceDate);
 	const ccy = instrument.currency;
 
 	// daily value series for this position (in EUR)
@@ -48,5 +49,11 @@ export const load: PageServerLoad = ({ params }) => {
 		}
 	}
 
-	return { instrument, position, txs: [...txs].reverse(), series };
+	return {
+		instrument,
+		position,
+		lots: [...lots].sort((a, b) => (a.date === b.date ? b.txId - a.txId : b.date.localeCompare(a.date))),
+		txs: [...txs].reverse(),
+		series
+	};
 };

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import AreaChart from '$lib/components/AreaChart.svelte';
+	import LotsTable from '$lib/components/LotsTable.svelte';
 	import StatTile from '$lib/components/StatTile.svelte';
 	import { fmtCurrency, fmtDate, fmtEur, fmtPct, fmtQty, signClass } from '$lib/format';
 
@@ -9,12 +10,16 @@
 	let ccy = $derived(inst.currency);
 </script>
 
-<svelte:head><title>Cunti — {inst.name}</title></svelte:head>
+<svelte:head><title>Cunti — {inst.name} ({inst.symbol})</title></svelte:head>
 
 <header class="head">
 	<div>
 		<a class="back" href="/">← Dashboard</a>
-		<h1>{inst.name} <span class="badge {inst.type}">{inst.type}</span></h1>
+		<h1>
+			{inst.name}
+			<span class="ticker">{inst.symbol}</span>
+			<span class="badge {inst.type}">{inst.type}</span>
+		</h1>
 		<p class="sub">
 			<code>{inst.symbol}</code>
 			{#if inst.isin}
@@ -45,6 +50,11 @@
 <section class="card">
 	<h2>Andamento posizione</h2>
 	<AreaChart points={data.series} height={300} />
+</section>
+
+<section class="card">
+	<h2>Operazioni di acquisto</h2>
+	<LotsTable lots={data.lots} currency={ccy} showInstrument={false} />
 </section>
 
 <section class="card">
@@ -126,6 +136,10 @@
 		align-items: center;
 		gap: 0.7rem;
 		margin-top: 0.3rem;
+	}
+	h1 .ticker {
+		margin-left: 0;
+		font-size: 0.8rem;
 	}
 	.sub {
 		color: var(--ink-3);

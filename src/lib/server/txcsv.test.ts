@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { parseTransactionsCsv } from './txcsv';
 
 const instruments = [
-	{ id: 1, symbol: 'SWDA.MI' },
-	{ id: 2, symbol: 'bitcoin' }
+	{ id: 1, symbol: 'SWDA.MI', isin: 'IE00B4L5Y983' },
+	{ id: 2, symbol: 'bitcoin', isin: null }
 ];
 const brokers = [
 	{ id: 10, name: 'Directa' },
@@ -93,6 +93,77 @@ describe('parseTransactionsCsv', () => {
 		expect(errors).toHaveLength(7);
 		expect(errors[0]).toContain('Riga 3');
 		expect(errors.at(-1)).toContain('futuro');
+	});
+
+	it('risolve lo strumento dal solo ISIN, senza colonna strumento', () => {
+		const csv = 'data;isin;tipo;quantita;prezzo\n2024-01-15;ie00b4l5y983;acquisto;10;98,54';
+		const { rows, errors } = parseTransactionsCsv(csv, instruments, brokers);
+		expect(errors).toEqual([]);
+		expect(rows).toHaveLength(1);
+		expect(rows[0].instrument_id).toBe(1);
+	});
+
+	it('ISIN e simbolo insieme: coerenti ok, discordanti errore, ISIN sconosciuto errore', () => {
+		const ok = parseTransactionsCsv(
+			'data;strumento;isin;tipo;quantita;prezzo\n2024-01-15;SWDA.MI;IE00B4L5Y983;buy;1;100',
+			instruments,
+			brokers
+		);
+		expect(ok.errors).toEqual([]);
+		expect(ok.rows[0].instrument_id).toBe(1);
+
+		const clash = parseTransactionsCsv(
+			'data;strumento;isin;tipo;quantita;prezzo\n2024-01-15;bitcoin;IE00B4L5Y983;buy;1;100',
+			instruments,
+			brokers
+		);
+		expect(clash.rows).toEqual([]);
+		expect(clash.errors[0]).toContain('strumenti diversi');
+
+		const unknown = parseTransactionsCsv(
+			'data;isin;tipo;quantita;prezzo\n2024-01-15;IE00XXXXXXXX;buy;1;100',
+			instruments,
+			brokers
+		);
+		expect(unknown.rows).toEqual([]);
+		expect(unknown.errors[0]).toContain('non trovato');
+	});
+
+	it('con entrambe le colonne, la riga può usare solo il simbolo o solo l’ISIN', () => {
+		const csv = [
+			'data;strumento;isin;tipo;quantita;prezzo',
+			'2024-01-15;bitcoin;;buy;0,5;40000', // solo simbolo
+			'2024-01-16;;IE00B4L5Y983;buy;1;100', // solo ISIN
+			'2024-01-17;;;buy;1;100' // nessuno dei due
+		].join('\n');
+		const { rows, errors } = parseTransactionsCsv(csv, instruments, brokers);
+		expect(rows.map((r) => r.instrument_id)).toEqual([2, 1]);
+		expect(errors).toHaveLength(1);
+		expect(errors[0]).toContain('Riga 4');
+	});
+
+	it('ISIN condiviso da più strumenti → errore di ambiguità', () => {
+		const dup = [
+			{ id: 1, symbol: 'SWDA.MI', isin: 'IE00B4L5Y983' },
+			{ id: 3, symbol: 'SWDA.DE', isin: 'IE00B4L5Y983' }
+		];
+		const { rows, errors } = parseTransactionsCsv(
+			'data;isin;tipo;quantita;prezzo\n2024-01-15;IE00B4L5Y983;buy;1;100',
+			dup,
+			brokers
+		);
+		expect(rows).toEqual([]);
+		expect(errors[0]).toContain('più strumenti');
+	});
+
+	it('senza colonna strumento né isin → errore di intestazione', () => {
+		const { rows, errors } = parseTransactionsCsv(
+			'data;tipo;quantita;prezzo\n2024-01-15;buy;1;100',
+			instruments,
+			brokers
+		);
+		expect(rows).toEqual([]);
+		expect(errors[0]).toContain('isin');
 	});
 
 	it('file vuoto o solo header → errore', () => {

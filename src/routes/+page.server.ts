@@ -9,7 +9,7 @@ export interface TxMarker {
 	date: string;
 	type: 'buy' | 'sell';
 	assetType: 'etf' | 'crypto';
-	label: string; // "3 × iShares Core MSCI World"
+	label: string; // "3 × iShares Core MSCI World (SWDA.MI)"
 }
 
 export const load: PageServerLoad = () => {
@@ -18,7 +18,7 @@ export const load: PageServerLoad = () => {
 	const txMarkers = db
 		.prepare(
 			`SELECT t.date, t.type, i.type AS assetType,
-				(t.quantity || ' × ' || i.name) AS label
+				(t.quantity || ' × ' || i.name || ' (' || i.symbol || ')') AS label
 			 FROM transactions t JOIN instruments i ON i.id = t.instrument_id
 			 ORDER BY t.date, t.id`
 		)

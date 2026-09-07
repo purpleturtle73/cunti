@@ -120,10 +120,13 @@
 		</ul>
 	{/if}
 	<p class="hint">
-		Intestazione richiesta: <code>data;strumento;tipo;quantita;prezzo</code> (opzionali:
-		<code>commissioni</code>, <code>broker</code>, <code>note</code>). Separatore <code>;</code> o
+		Intestazione richiesta: <code>data;tipo;quantita;prezzo</code> più <code>strumento</code>
+		e/o <code>isin</code> (opzionali: <code>commissioni</code>, <code>broker</code>,
+		<code>note</code>). Separatore <code>;</code> o
 		<code>,</code>, data <code>YYYY-MM-DD</code> o <code>GG/MM/AAAA</code>, decimali con virgola o
 		punto. <strong>strumento</strong> = simbolo (es. <code>SWDA.MI</code>, <code>bitcoin</code>),
+		<strong>isin</strong> = ISIN censito sullo strumento (es. <code>IE00B4L5Y983</code>): se
+		presente vince sul simbolo, e se i due indicano strumenti diversi la riga è un errore.
 		<strong>tipo</strong> = <code>acquisto</code>/<code>vendita</code> (o buy/sell),
 		<strong>broker</strong> = nome esistente. Le righe vengono aggiunte allo storico
 		<strong>senza duplicati</strong>: quelle identiche a transazioni già presenti (stesso strumento,
@@ -174,7 +177,7 @@
 								<td>
 									<select form="edit-tx" name="instrument_id" required>
 										{#each data.instruments as inst (inst.id)}
-											<option value={inst.id} selected={inst.id === tx.instrument_id}>{inst.name}</option>
+											<option value={inst.id} selected={inst.id === tx.instrument_id}>{inst.name} ({inst.symbol})</option>
 										{/each}
 									</select>
 								</td>
@@ -206,7 +209,10 @@
 						{:else}
 							<tr>
 								<td>{fmtDate(tx.date)}</td>
-								<td class="inst-cell">{@render typeIcon(tx.instrument_type)}{tx.instrument_name}</td>
+								<td class="inst-cell">
+								{@render typeIcon(tx.instrument_type)}{tx.instrument_name}
+								<span class="ticker" title={tx.instrument_isin ?? undefined}>{tx.instrument_symbol}</span>
+							</td>
 								<td>
 									<span class={['side', tx.type]}>{tx.type === 'buy' ? 'Acquisto' : 'Vendita'}</span>
 								</td>

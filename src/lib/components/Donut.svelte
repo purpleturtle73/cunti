@@ -6,6 +6,7 @@
 		value: number;
 		color: string;
 		sub?: string;
+		ticker?: string; // simbolo dello strumento, mostrato accanto al nome e al centro
 	}
 
 	let { slices, title = 'Totale' }: { slices: Slice[]; title?: string } = $props();
@@ -44,7 +45,11 @@
 
 	let center = $derived(
 		hovered != null && arcs[hovered]
-			? { label: arcs[hovered].label, value: arcs[hovered].value, pct: arcs[hovered].value / total }
+			? {
+					label: arcs[hovered].ticker ?? arcs[hovered].label,
+					value: arcs[hovered].value,
+					pct: arcs[hovered].value / total
+				}
 			: { label: title, value: total, pct: null }
 	);
 </script>
@@ -77,6 +82,7 @@
 			>
 				<i style:background={a.color}></i>
 				<span class="name">{a.label}</span>
+				{#if a.ticker}<span class="ticker">{a.ticker}</span>{/if}
 				<span class="w tabular">{fmtPct(a.value / total, false)}</span>
 			</li>
 		{/each}
@@ -139,6 +145,10 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+	li .ticker {
+		flex: none;
+		margin-left: 0;
 	}
 	.w {
 		margin-left: auto;

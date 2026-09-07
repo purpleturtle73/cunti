@@ -40,6 +40,12 @@ export function fmtDate(day: string): string {
 	return `${d}/${m}/${y}`;
 }
 
+/** Etichetta testuale di uno strumento con ticker: "iShares Core MSCI World (SWDA.MI)".
+ *  Per il markup usare invece il nome seguito da <span class="ticker">. */
+export function instrumentLabel(name: string, symbol: string | null | undefined): string {
+	return symbol ? `${name} (${symbol})` : name;
+}
+
 export function signClass(v: number | null | undefined): string {
 	if (v == null || v === 0) return '';
 	return v > 0 ? 'pos' : 'neg';

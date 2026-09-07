@@ -2,10 +2,13 @@
  * Parser CSV per import transazioni (append allo storico).
  *
  * Formato: prima riga di intestazione, separatore `;` o `,` (autodetect).
- * Colonne (case-insensitive): data, strumento, tipo, quantita, prezzo,
- * commissioni (opzionale), broker (opzionale), note (opzionale).
+ * Colonne (case-insensitive): data, tipo, quantita, prezzo + almeno una tra
+ * strumento e isin; commissioni, broker, note sono opzionali.
  * - data: YYYY-MM-DD oppure DD/MM/YYYY
  * - strumento: simbolo dello strumento (es. SWDA.MI, bitcoin), deve esistere
+ * - isin: ISIN dello strumento (es. IE00B4L5Y983), deve essere censito in anagrafica.
+ *   Se presente ha la precedenza sul simbolo; se entrambi risolvono a strumenti
+ *   diversi la riga è un errore.
  * - tipo: buy/sell oppure acquisto/vendita
  * - numeri: virgola o punto decimale
  * - broker: nome (deve esistere), vuoto = nessuno
@@ -14,6 +17,7 @@
 export interface CsvInstrument {
 	id: number;
 	symbol: string;
+	isin?: string | null;
 }
 
 export interface CsvBroker {
@@ -38,8 +42,15 @@ export interface CsvResult {
 	errors: string[];
 }
 
-const REQUIRED = ['data', 'strumento', 'tipo', 'quantita', 'prezzo'] as const;
+const REQUIRED = ['data', 'tipo', 'quantita', 'prezzo'] as const;
+/** Identificativo dello strumento: ne basta una delle due in intestazione. */
+const IDENTIFIERS = ['strumento', 'isin'] as const;
 const OPTIONAL = ['commissioni', 'broker', 'note'] as const;
+
+/** ISIN normalizzato per il confronto: maiuscolo, senza spazi o separatori. */
+export function normIsin(raw: string): string {
+	return raw.trim().toUpperCase().replace(/[\s.-]/g, '');
+}
 
 /** Divide una riga CSV rispettando i campi tra doppi apici (con escape ""). */
 export function splitLine(line: string, sep: string): string[] {
@@ -132,15 +143,25 @@ export function parseTransactionsCsv(
 	const header = splitLine(lines[0], sep).map(normHeader);
 
 	const col: Record<string, number> = {};
-	for (const name of [...REQUIRED, ...OPTIONAL]) {
+	for (const name of [...REQUIRED, ...IDENTIFIERS, ...OPTIONAL]) {
 		const idx = header.indexOf(name);
 		if (idx >= 0) col[name] = idx;
 	}
 	const missing = REQUIRED.filter((name) => !(name in col));
 	if (missing.length > 0)
-		return { rows, errors: [`Intestazione: colonne mancanti: ${missing.join(', ')}. Attese: ${REQUIRED.join(', ')} (+ ${OPTIONAL.join(', ')} opzionali).`] };
+		return { rows, errors: [`Intestazione: colonne mancanti: ${missing.join(', ')}. Attese: ${REQUIRED.join(', ')} + strumento e/o isin (+ ${OPTIONAL.join(', ')} opzionali).`] };
+	if (!IDENTIFIERS.some((name) => name in col))
+		return { rows, errors: ['Intestazione: serve almeno una colonna tra "strumento" (simbolo) e "isin".'] };
 
 	const bySymbol = new Map(instruments.map((i) => [i.symbol.toLowerCase(), i.id]));
+	// Un ISIN censito su più strumenti è ambiguo: lo si segnala invece di scegliere a caso.
+	const byIsin = new Map<string, number[]>();
+	for (const i of instruments) {
+		if (!i.isin) continue;
+		const key = normIsin(i.isin);
+		if (key === '') continue;
+		byIsin.set(key, [...(byIsin.get(key) ?? []), i.id]);
+	}
 	const byBroker = new Map(brokers.map((b) => [b.name.toLowerCase(), b.id]));
 	const today = new Date().toISOString().slice(0, 10);
 
@@ -159,11 +180,37 @@ export function parseTransactionsCsv(
 			continue;
 		}
 
-		const symbol = get('strumento');
-		const instrument_id = bySymbol.get(symbol.toLowerCase());
-		if (!instrument_id) {
-			errors.push(`Riga ${lineNo}: strumento "${symbol}" non trovato (usa il simbolo, es. SWDA.MI).`);
+		const symbol = get('strumento').trim();
+		const isin = normIsin(get('isin'));
+		if (symbol === '' && isin === '') {
+			errors.push(`Riga ${lineNo}: manca l'identificativo dello strumento (simbolo o ISIN).`);
 			continue;
+		}
+
+		// L'ISIN, se valorizzato, ha la precedenza; il simbolo serve da conferma.
+		let instrument_id: number | undefined;
+		if (isin !== '') {
+			const matches = byIsin.get(isin);
+			if (!matches) {
+				errors.push(`Riga ${lineNo}: ISIN "${isin}" non trovato (censiscilo sullo strumento in Amministrazione).`);
+				continue;
+			}
+			if (matches.length > 1) {
+				errors.push(`Riga ${lineNo}: ISIN "${isin}" associato a più strumenti: usa la colonna strumento (simbolo).`);
+				continue;
+			}
+			instrument_id = matches[0];
+			const bySym = symbol === '' ? undefined : bySymbol.get(symbol.toLowerCase());
+			if (bySym !== undefined && bySym !== instrument_id) {
+				errors.push(`Riga ${lineNo}: simbolo "${symbol}" e ISIN "${isin}" appartengono a strumenti diversi.`);
+				continue;
+			}
+		} else {
+			instrument_id = bySymbol.get(symbol.toLowerCase());
+			if (!instrument_id) {
+				errors.push(`Riga ${lineNo}: strumento "${symbol}" non trovato (usa il simbolo, es. SWDA.MI).`);
+				continue;
+			}
 		}
 
 		const type = TYPES[get('tipo').toLowerCase()];

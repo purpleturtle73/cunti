@@ -2,6 +2,7 @@
 	import AreaChart from '$lib/components/AreaChart.svelte';
 	import Bars from '$lib/components/Bars.svelte';
 	import Donut from '$lib/components/Donut.svelte';
+	import LotsTable from '$lib/components/LotsTable.svelte';
 	import StatTile from '$lib/components/StatTile.svelte';
 	import { fmtCurrency, fmtDate, fmtEur, fmtPct, signClass } from '$lib/format';
 
@@ -13,7 +14,7 @@
 
 	// Marker operazioni sul grafico: nessuno / solo ETF (PAC) / solo crypto / tutte
 	type MarkerFilter = 'none' | 'etf' | 'crypto' | 'all';
-	let markerFilter = $state<MarkerFilter>('none');
+	let markerFilter = $state<MarkerFilter>('all');
 	const MARKER_OPTIONS: { key: MarkerFilter; label: string }[] = [
 		{ key: 'none', label: 'Nessuna' },
 		{ key: 'etf', label: 'ETF' },
@@ -66,12 +67,18 @@
 	let donutSlices = $derived.by(() => {
 		const top = snap.allocation.slice(0, 7).map((a, i) => ({
 			label: a.name,
+			ticker: a.symbol,
 			value: a.value,
 			color: SLOT_COLORS[i]
 		}));
 		const rest = snap.allocation.slice(7);
 		if (rest.length > 0)
-			top.push({ label: 'Altro', value: rest.reduce((s, a) => s + a.value, 0), color: 'var(--ink-3)' });
+			top.push({
+				label: 'Altro',
+				ticker: '',
+				value: rest.reduce((s, a) => s + a.value, 0),
+				color: 'var(--ink-3)'
+			});
 		return top;
 	});
 
@@ -306,7 +313,10 @@
 				<tbody>
 					{#each snap.positions.filter((p) => p.quantity > 0) as p (p.instrument.id)}
 						<tr>
-							<td><a class="pos-link" href="/positions/{p.instrument.id}">{p.instrument.name}</a></td>
+							<td>
+								<a class="pos-link" href="/positions/{p.instrument.id}">{p.instrument.name}</a>
+								<span class="ticker">{p.instrument.symbol}</span>
+							</td>
 							<td><span class="badge {p.instrument.type}">{p.instrument.type}</span></td>
 							<td class="num">{p.quantity.toLocaleString('it-IT', { maximumFractionDigits: 6 })}</td>
 							<td class="num">{fmtCurrency(p.avgCost, p.instrument.currency)}</td>
@@ -320,6 +330,11 @@
 				</tbody>
 			</table>
 		</div>
+	</section>
+
+	<section class="card">
+		<h2>Operazioni di acquisto</h2>
+		<LotsTable lots={snap.lots} />
 	</section>
 {/if}
 
@@ -471,15 +486,16 @@
 		gap: 0.45rem;
 	}
 	.marker-legend .dot {
-		width: 10px;
-		height: 10px;
-		border-radius: 999px;
+		width: 0;
+		height: 0;
+		border-left: 5px solid transparent;
+		border-right: 5px solid transparent;
 	}
 	.marker-legend .dot.buy {
-		background: var(--good);
+		border-bottom: 8px solid var(--good);
 	}
 	.marker-legend .dot.sell {
-		background: var(--bad);
+		border-top: 8px solid var(--bad);
 	}
 
 	.tiles {

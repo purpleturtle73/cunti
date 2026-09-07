@@ -167,6 +167,7 @@ export const actions: Actions = {
 			const info = await createBackup();
 			return { section: 'backup', success: `Backup creato: ${info.name}` };
 		} catch (e) {
+			logError('backup', 'backup manuale fallito', e);
 			return fail(500, { section: 'backup', error: `Backup fallito: ${String(e)}` });
 		}
 	},
@@ -180,6 +181,7 @@ export const actions: Actions = {
 			restoreBackup(name);
 			return { section: 'backup', success: `Ripristinato ${name}. Ricarica le pagine aperte.` };
 		} catch (e) {
+			logError('backup', `restore da ${name} fallito`, e);
 			return fail(400, { section: 'backup', error: `Ripristino fallito: ${String(e)}` });
 		}
 	},
@@ -191,6 +193,7 @@ export const actions: Actions = {
 			deleteBackup(name);
 			return { section: 'backup', success: `Eliminato ${name}.` };
 		} catch (e) {
+			logError('backup', `eliminazione ${name} fallita`, e);
 			return fail(400, { section: 'backup', error: String(e) });
 		}
 	},

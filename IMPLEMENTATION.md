@@ -22,7 +22,7 @@ src/
   lib/server/
     db.ts                      schema + helper SQLite (instruments, transactions, prices, brokers, fx_rates, settings)
     prices.ts                  fetcher Yahoo/CoinGecko (valuta strumento), FX EURUSD, refreshAll, scheduler 6h
-    portfolio.ts               motore: posizioni (PMC), serie giornaliera, TWR, periodi, drawdown, conversione EUR
+    portfolio.ts               motore: posizioni (PMC), lotti di acquisto (FIFO), serie giornaliera, TWR, periodi, drawdown, conversione EUR
     backup.ts                  backup/restore SQLite, rotazione 10gg, scheduler giornaliero
     txcsv.ts                   parser CSV import transazioni (puro, testabile)
     tax.ts                     stime fiscali italiane
@@ -31,9 +31,11 @@ src/
     AreaChart.svelte           area+linea con crosshair/tooltip, linea "investito" tratteggiata
     Donut.svelte               allocazione con gap 2°, hover, centro dinamico
     Bars.svelte                flussi mensili PAC (investito/disinvestito)
+    LotsTable.svelte           tabella dei singoli acquisti (lotti FIFO) con filtro aperte/chiuse
     StatTile.svelte            tile statistica
   routes/
-    +page.svelte               dashboard (hero, pill periodi, marker operazioni, tiles, fisco, posizioni)
+    +layout.svelte             shell: barra laterale collassabile (desktop) / drawer con burger (mobile)
+    +page.svelte               dashboard (hero, pill periodi, marker operazioni, tiles, fisco, posizioni, lotti)
     transactions/              CRUD transazioni + modifica inline, duplica, import/export CSV
     spese/                     tracker spese: dashboard, movimenti, import a due fasi, categorie/regole
     instruments/               solo redirect 301 → /admin (gestione spostata lì)
@@ -45,6 +47,12 @@ src/
     api/brokers/[id]/logo/     GET logo broker (BLOB dal DB)
 scripts/make-demo-db.js        genera DATA_DIR/demo-cunti.db con dati generici (uso manuale)
 ```
+
+### Navigazione: barra laterale collassabile
+
+- **Desktop** (>900px): la barra è una colonna della griglia (`--side-w`: 230px estesa, 76px ridotta) con transizione su `grid-template-columns`. Il tasto **burger** nell'intestazione della barra alterna i due stati; da ridotta restano solo le icone (etichette in `title`, logo senza nome, footer compatto). La preferenza è per browser in `localStorage` (`cunti:sidebar-collapsed`), letta in un `$effect` **dopo** l'idratazione così l'HTML SSR resta uno solo.
+- **Mobile** (≤900px): la barra diventa un drawer `position: fixed` fuori schermo, aperto dal burger della topbar; scrim cliccabile, `Esc` per chiudere, chiusura automatica al cambio pagina (`$effect` su `page.url.pathname`). Nel drawer la barra è sempre estesa, anche se su desktop è ridotta.
+- Ogni strumento nelle tabelle è **nome + ticker** (`<span class="ticker">`, stile globale in `app.css`); nel donut il ticker compare in legenda e al centro all'hover, dove il nome per esteso non ci starebbe.
 
 ### Backup e restore
 
@@ -60,7 +68,9 @@ scripts/make-demo-db.js        genera DATA_DIR/demo-cunti.db con dati generici (
 
 - **Modifica inline**: nella tabella storico ogni riga ha ✎ che la trasforma in riga di input (tutti i campi: data, strumento, tipo, broker, quantità, prezzo, commissioni, note). Tecnica: un unico `<form id="edit-tx">` vuoto fuori dalla tabella + attributo HTML `form="edit-tx"` sugli input nelle celle (un `<form>` non può avvolgere un `<tr>`). Salva → action `update`; ✕ annulla.
 - **Duplica** (⧉): action `duplicate` copia il record (`INSERT … SELECT`) e apre subito la copia in modifica inline (l'action ritorna `duplicatedId`).
-- **Import CSV** (con deduplica): action `import` + parser puro `txcsv.ts`. Header obbligatorio `data;strumento;tipo;quantita;prezzo` (opzionali `commissioni`, `broker`, `note`); separatore `;` o `,` autodetect; date `YYYY-MM-DD` o `DD/MM/YYYY`; decimali con virgola o punto (gestiti separatori migliaia); `strumento` = simbolo esistente (case-insensitive), `broker` = nome esistente; `tipo` = buy/sell/acquisto/vendita; campi quotati e BOM Excel gestiti. Con errori di formato (riportati riga per riga) non viene inserito nulla. Limite file 2 MB.
+- **Import CSV** (con deduplica): action `import` + parser puro `txcsv.ts`. Header obbligatorio `data;tipo;quantita;prezzo` **più `strumento` e/o `isin`** (opzionali `commissioni`, `broker`, `note`); separatore `;` o `,` autodetect; date `YYYY-MM-DD` o `DD/MM/YYYY`; decimali con virgola o punto (gestiti separatori migliaia); `strumento` = simbolo esistente (case-insensitive), `broker` = nome esistente; `tipo` = buy/sell/acquisto/vendita; campi quotati e BOM Excel gestiti. Con errori di formato (riportati riga per riga) non viene inserito nulla. Limite file 2 MB.
+- **Identificazione strumento via ISIN**: la colonna `isin` risolve lo strumento contro `instruments.isin`, normalizzando maiuscole/spazi/trattini. Se una riga ha entrambi, **l'ISIN vince** e il simbolo fa da conferma: se risolve a uno strumento diverso la riga è un errore, se non risolve affatto viene ignorato (i ticker dei broker spesso differiscono dal simbolo Yahoo). ISIN sconosciuto → errore di riga; ISIN censito su più strumenti → errore di ambiguità (la colonna non è UNIQUE a schema). Con le due colonne presenti ogni riga può usarne una sola, ma almeno una deve essere valorizzata.
+- **Export CSV**: stesse colonne dell'import, ISIN incluso (`data;strumento;isin;tipo;quantita;prezzo;commissioni;broker;note`) → round-trip completo.
 - **Deduplica import** (`insertTransactionsDedup` in db.ts): chiave di duplicato = strumento + tipo + data + quantità + prezzo + commissioni (note e broker esclusi di proposito). Le righe già presenti nel DB vengono saltate e segnalate con il numero di riga; il controllo gira dentro la transazione SQLite, quindi elimina anche i doppioni interni al file. Reimportare lo stesso CSV è idempotente.
 - Validazione condivisa `readTxForm()` tra `create` e `update` (controlli esistenza strumento/broker, date non future lato CSV, numeri finiti).
 
@@ -91,6 +101,7 @@ Cascata (transazioni + prezzi) protetta su due livelli: doppia `confirm` client 
 
 - `GET /api/health` → `SELECT 1` sul DB, 200/500.
 - `HEALTHCHECK` nel Containerfile (fetch da Node ogni 30s, start-period 15s); nel Quadlet `Notify=healthy` fa dichiarare "avviato" il servizio systemd solo a healthcheck superato.
+- **Quadlet**: `HealthCmd`/`HealthInterval`/`HealthTimeout`/`HealthStartPeriod`/`HealthRetries` dichiarati anche nell'unit `.container` (README), non solo nell'immagine — `Notify=healthy` valuta l'healthcheck alla creazione del container e senza questi campi fallisce con `sdnotify policy "healthy" requires a healthcheck to be set` (es. immagine pull-ata precedente all'aggiunta dell'HEALTHCHECK, o comunque non affidarsi solo al valore ereditato dall'immagine).
 
 ### Spese (tracker finanze personali)
 
@@ -116,6 +127,7 @@ Dettagli di progetto in PLAN_SPESE.md; stato: M1–M3 implementate (2026-07-06).
 
 - **PMC (prezzo medio di carico)**: media ponderata degli acquisti **commissioni incluse**; le vendite riducono la quantità senza toccare il PMC (metodo del costo medio, coerente col regime amministrato). Posizione azzerata → PMC azzerato.
 - **Plusvalenza realizzata** = ricavato netto commissioni − quantità × PMC.
+- **Lotti di acquisto (`buildLots`)**: ogni acquisto è un lotto con costo unitario **commissione inclusa**; le vendite consumano i lotti dal più vecchio (**FIFO**), quindi ogni riga porta la quota ancora aperta (`remaining`), il capitale residuo, il valore corrente e il P&L latente, più il realizzato già incassato su quel lotto. La somma dei lotti aperti coincide con `costBasis`/`unrealized` della posizione (verificato dai test). **Scelta deliberata**: la vista per lotto usa FIFO perché "questo acquisto è in guadagno?" ha senso solo su un lotto identificabile, mentre posizione e fisco restano a **costo medio** — i due totali del non realizzato coincidono, il realizzato per singolo lotto no (quello fiscale resta quello della posizione).
 - **Serie giornaliera**: dal primo acquisto a oggi; prezzi weekend/festivi carry-forward dell'ultimo noto; transazioni più vecchie dello storico prezzi (crypto, limite 365gg) → backfill col primo prezzo disponibile.
 - **TWR**: indice giornaliero `r_t = (V_t − V_{t−1} − F_t) / (V_{t−1} + F_t)` — i rendimenti di periodo non sono distorti dai versamenti del PAC. Baseline di periodo = giorno precedente all'apertura della finestra; se la finestra copre tutta la serie, baseline virtuale a inception (twr=1, valore=0) così il primo giorno è incluso.
 - **P&L assoluto di periodo** = ΔValore − flussi netti del periodo.
@@ -146,9 +158,9 @@ Dettagli di progetto in PLAN_SPESE.md; stato: M1–M3 implementate (2026-07-06).
 ### Unit test (vitest — `npm test`, eseguiti in CI)
 
 - `src/lib/server/tax.test.ts` (pure, senza DB): aliquota crypto per anno (26/33), imposte latenti al 26% e con aliquota custom 12,5%, nessuna imposta su posizioni in perdita, compensazione gains/losses crypto nello stesso anno, **non**-compensazione minusvalenze ETF, bollo/IVAFE/TER, netProfit = lordo − imposte.
-- `src/lib/server/portfolio.test.ts` (DB SQLite isolato in `tmp/test-data`): PMC con commissioni incluse, vendita (plusvalenza vs PMC, PMC invariato), azzeramento posizione, `buildSnapshot` (totali, serie giornaliera, flussi, TWR di periodo, P&L assoluto); conversione USD→EUR (`makeFxConverter`: carry-forward/backfill/identità; `buildPosition`: PMC in USD, aggregati in EUR ai cambi delle date).
+- `src/lib/server/portfolio.test.ts` (DB SQLite isolato in `tmp/test-data`): PMC con commissioni incluse, vendita (plusvalenza vs PMC, PMC invariato), azzeramento posizione, `buildSnapshot` (totali, serie giornaliera, flussi, TWR di periodo, P&L assoluto); conversione USD→EUR (`makeFxConverter`: carry-forward/backfill/identità; `buildPosition`: PMC in USD, aggregati in EUR ai cambi delle date); `buildLots` (un lotto per acquisto con commissione nel carico, consumo FIFO su più lotti con realizzato per lotto, commissione di vendita che riduce il ricavo, somma dei lotti = posizione, lotti esposti nello snapshot col ticker).
 - `src/lib/server/backup.test.ts` (DB isolato in `tmp/test-backup`): creazione backup (file valido, `last_backup`), rotazione oltre 10 giorni, validazione nomi (traversal), restore che riporta i dati allo stato del backup, rifiuto di file non-SQLite.
-- `src/lib/server/txcsv.test.ts` (puro): separatori `;`/`,`, decimali it/US con migliaia, date ISO e italiane, header con accenti/maiuscole, campi quotati, BOM, errori riga per riga (data/strumento/tipo/quantità/prezzo/broker invalidi, date future), colonne obbligatorie mancanti, file vuoto.
+- `src/lib/server/txcsv.test.ts` (puro): separatori `;`/`,`, decimali it/US con migliaia, date ISO e italiane, header con accenti/maiuscole, campi quotati, BOM, errori riga per riga (data/strumento/tipo/quantità/prezzo/broker invalidi, date future), colonne obbligatorie mancanti, file vuoto; **ISIN**: risoluzione dal solo ISIN, coerenza ISIN+simbolo, discordanza e ISIN sconosciuto, riga senza identificativo, ISIN ambiguo su più strumenti, intestazione senza né `strumento` né `isin`.
 - `src/lib/server/tximport.test.ts` (DB isolato in `tmp/test-import`): dedup contro il DB (reimport idempotente), dedup dei doppioni interni al batch, ogni campo chiave rende unica la riga, note/broker diversi non evitano il dedup.
 - `src/lib/server/expensecsv.test.ts` (puro): formato storico completo, formato grezzo minimo, header `data`, colonne extra ignorate, categoria vuota/unknown→null, incoerenza moneyin/moneyout, errori riga per riga, header senza colonne obbligatorie.
 - `src/lib/server/expenses.test.ts` (DB isolato in `tmp/test-expenses`): motore regole (longest-match case-insensitive, keyword regex sospette, json malformato, card default, categoria CSV che vince), import due fasi (nuovo→conferma, reimport idempotente, dedup a conteggio con terza occorrenza, conflitto risolto CSV e DB, token inesistente), export round-trip (reimport = tutto duplicato), wipe con backup + ripristino da reimport.
@@ -176,6 +188,24 @@ Deploy: Podman Quadlet con `AutoUpdate=registry` (vedi README).
 - **Spese — rifiniture (M4)**: editor in-app di `categories.json`, budget mensile per categoria, note su movimento, azioni bulk sulla lista movimenti (piano in PLAN_SPESE.md).
 
 ## Changelog
+
+### 2026-09-06 — Ticker ovunque, ISIN nell'import, lotti di acquisto, barra laterale collassabile
+- **Ticker nel nome dello strumento**: tabelle posizioni e transazioni, legenda e centro del donut, titolo e intestazione del dettaglio posizione, select di modifica transazione, etichette dei marker sul grafico. Stile condiviso `.ticker` in `app.css`; helper testuale `instrumentLabel()` in `lib/format.ts`. Nella riga transazione il ticker porta l'ISIN in `title`.
+- **ISIN nel CSV di import**: nuova colonna opzionale `isin`; `strumento` non è più obbligatoria di per sé, ne basta una delle due. ISIN prevalente sul simbolo, errore se i due indicano strumenti diversi o se l'ISIN è sconosciuto/ambiguo. Export CSV allineato (colonna `isin` in seconda posizione) per il round-trip.
+- **Spaccato dei singoli acquisti**: nuovo motore `buildLots` (lotti con consumo FIFO delle vendite) e componente `LotsTable.svelte`, con filtro aperte/chiuse/tutte, ordinamento per data o risultato e riga totali. Mostrato in dashboard sotto "Posizioni" (con strumento+ticker) e nel dettaglio posizione (senza colonna strumento). Scelta: tabella dedicata invece che colonne in più nello storico transazioni — lo storico resta il registro delle operazioni (anche le vendite), i lotti sono la vista "questo acquisto è in guadagno?".
+- **Barra laterale collassabile**: burger che riduce la barra a sole icone su desktop (preferenza in `localStorage`) e apre il drawer sotto i 900px, con scrim, `Esc` e chiusura al cambio pagina.
+- **Marker operazioni più leggibili**: triangoli verso l'alto (acquisto) e verso il basso (vendita) con trattino di aggancio al punto della serie invece dei pallini sovrapposti, e filtro impostato su "Tutte" di default (prima era "Nessuna", quindi di fatto invisibile).
+- Verifiche: `svelte-check` 0 errori/0 warning, build ok, 56 unit test verdi (13 nuovi tra ISIN e lotti). Smoke test SSR su DB demo: dashboard/transazioni/dettaglio posizione 200 con ticker e tabella lotti; import di un CSV con solo ISIN inserito e reimport correttamente deduplicato. Nota: `backup.test.ts > restore` è al limite del timeout di 5s (fallito su una macchina sotto carico, verde da solo) — è lento per `db.backup()` + checkpoint WAL, non per il codice modificato qui.
+
+### 2026-09-06 — Log più verbosi (access log + eventi mancanti)
+- **Access log** (`hooks.server.ts`, scope `http`): un rigo per richiesta (metodo, path+query, status, durata ms). Gli asset statici non passano da `handle` (serviti da adapter-node prima), quindi restano fuori.
+- **Startup** (scope `server`): log di `DATA_DIR`/`PORT` all'avvio, prima degli scheduler.
+- **Backup** (scope `backup`, prima quasi muto): scheduler avviato (ultimo backup), creazione (nome+dimensione), restore (avvio+fine), eliminazione, upload; fallimenti di backup/restore/delete dalle action di `/admin` ora loggati con `logError` (prima solo `fail()` verso la UI, niente in `podman logs`); rimosso `console.error` grezzo nello scheduler a favore di `logError`.
+- Verifiche: `svelte-check` 0 errori/0 warning, 48 unit test verdi.
+
+### 2026-09-06 — Fix Quadlet: healthcheck esplicito nell'unit
+- **Bug**: `Notify=healthy` nel Quadlet falliva con `invalid argument: sdnotify policy "healthy" requires a healthcheck to be set` — l'healthcheck del Containerfile da solo non basta perché Quadlet valuta l'healthcheck alla creazione del container, non quello ereditato dall'immagine (es. tag `latest` pull-ato prima dell'aggiunta dell'HEALTHCHECK).
+- **Fix**: aggiunti `HealthCmd`/`HealthInterval`/`HealthTimeout`/`HealthStartPeriod`/`HealthRetries` direttamente nello snippet Quadlet in README, stessa CMD del Containerfile.
 
 ### 2026-07-07 — Decisione: panoramica unificata
 - Registrato in PLAN_SPESE.md il design della **panoramica unificata** (home mista portafoglio+spese, dashboard investimenti → `/investimenti`) e lo stato fatto/da fare del piano spese; roadmap allineata (panoramica, M4, collaudo storico reale, squash pre-push).

@@ -63,6 +63,92 @@ export interface Position {
 	firstDate: string | null;
 }
 
+/** Singola operazione di acquisto seguita nel tempo (lotto).
+ *  I lotti vengono consumati dalle vendite in ordine FIFO: `remaining` è la quota
+ *  ancora in portafoglio, `realized` il risultato già incassato sulla parte venduta.
+ *  unitCost è nella valuta dello strumento (display), gli aggregati sono in EUR. */
+export interface Lot {
+	txId: number;
+	date: string;
+	quantity: number; // quantità acquistata
+	remaining: number; // quantità ancora aperta
+	unitCost: number; // costo unitario, commissione inclusa (valuta strumento)
+	unitCostEur: number; // costo unitario in EUR al cambio della data di acquisto
+	fee: number; // commissione dell'acquisto (valuta strumento)
+	costBasis: number; // EUR, sulla sola quota residua
+	value: number; // EUR, valore attuale della quota residua
+	unrealized: number;
+	unrealizedPct: number;
+	realized: number; // EUR, plus/minusvalenza già realizzata su questo lotto
+}
+
+/** Ricostruisce i lotti di acquisto di uno strumento con consumo FIFO delle vendite.
+ *  lastPrice/lastPriceDate: se omessi vengono letti dallo storico prezzi. */
+export function buildLots(
+	instrument: Instrument,
+	txs: Transaction[],
+	toEur: ToEur = identityToEur,
+	lastPrice?: number | null,
+	lastPriceDate?: string | null
+): Lot[] {
+	const ccy = instrument.currency;
+	const lots: Lot[] = [];
+
+	for (const tx of txs) {
+		if (tx.type === 'buy') {
+			const unitCost = tx.price + tx.fee / tx.quantity;
+			lots.push({
+				txId: tx.id,
+				date: tx.date,
+				quantity: tx.quantity,
+				remaining: tx.quantity,
+				unitCost,
+				unitCostEur: toEur(unitCost, ccy, tx.date),
+				fee: tx.fee,
+				costBasis: 0,
+				value: 0,
+				unrealized: 0,
+				unrealizedPct: 0,
+				realized: 0
+			});
+		} else {
+			let toSell = tx.quantity;
+			const unitProceedsEur = toEur(tx.price - tx.fee / tx.quantity, ccy, tx.date);
+			for (const lot of lots) {
+				if (toSell <= 0) break;
+				if (lot.remaining <= 0) continue;
+				const take = Math.min(lot.remaining, toSell);
+				lot.realized += take * (unitProceedsEur - lot.unitCostEur);
+				lot.remaining -= take;
+				toSell -= take;
+			}
+		}
+	}
+
+	if (lastPrice === undefined) {
+		lastPrice = null;
+		lastPriceDate = null;
+		for (const [date, close] of priceHistory(instrument.id)) {
+			lastPrice = close;
+			lastPriceDate = date;
+		}
+	}
+	const unitValueEur =
+		lastPrice != null ? toEur(lastPrice, ccy, lastPriceDate ?? today()) : null;
+
+	for (const lot of lots) {
+		lot.costBasis = lot.remaining * lot.unitCostEur;
+		lot.value = unitValueEur != null ? lot.remaining * unitValueEur : lot.costBasis;
+		lot.unrealized = lot.value - lot.costBasis;
+		lot.unrealizedPct = lot.costBasis > 0 ? lot.unrealized / lot.costBasis : 0;
+	}
+	return lots;
+}
+
+export interface SnapshotLot extends Lot {
+	instrument: { id: number; name: string; symbol: string; type: string; currency: string };
+}
+
 export interface DailyPoint {
 	date: string;
 	value: number;
@@ -94,7 +180,8 @@ export interface PortfolioSnapshot {
 	bestDay: { date: string; pct: number } | null;
 	worstDay: { date: string; pct: number } | null;
 	monthlyFlows: { month: string; invested: number; divested: number }[];
-	allocation: { name: string; value: number; weight: number; type: string; id: number }[];
+	allocation: { name: string; symbol: string; value: number; weight: number; type: string; id: number }[];
+	lots: SnapshotLot[]; // ogni acquisto, dal più recente
 }
 
 function today(): string {
@@ -350,11 +437,33 @@ export function buildSnapshot(): PortfolioSnapshot {
 		.map((p) => ({
 			id: p.instrument.id,
 			name: p.instrument.name,
+			symbol: p.instrument.symbol,
 			value: p.value,
 			weight: totalValue > 0 ? p.value / totalValue : 0,
 			type: p.instrument.type
 		}))
 		.sort((a, b) => b.value - a.value);
+
+	const lots: SnapshotLot[] = [];
+	for (const p of positions) {
+		const inst = p.instrument;
+		const meta = {
+			id: inst.id,
+			name: inst.name,
+			symbol: inst.symbol,
+			type: inst.type,
+			currency: inst.currency
+		};
+		for (const lot of buildLots(
+			inst,
+			txByInstrument.get(inst.id) ?? [],
+			toEur,
+			p.lastPrice,
+			p.lastPriceDate
+		))
+			lots.push({ ...lot, instrument: meta });
+	}
+	lots.sort((a, b) => (a.date === b.date ? b.txId - a.txId : b.date.localeCompare(a.date)));
 
 	return {
 		positions: positions.sort((a, b) => b.value - a.value),
@@ -371,6 +480,7 @@ export function buildSnapshot(): PortfolioSnapshot {
 		bestDay,
 		worstDay,
 		monthlyFlows,
-		allocation
+		allocation,
+		lots
 	};
 }

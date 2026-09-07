@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { DATA_DIR, db, getSetting, setSetting } from './db';
+import { log, logError } from './log';
 
 export const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const RETENTION_DAYS = 10;
@@ -50,6 +51,7 @@ export async function createBackup(): Promise<BackupInfo> {
 	rotate();
 	copyConfigFiles();
 	const st = fs.statSync(full);
+	log('backup', `creato ${name} (${st.size} byte)`);
 	return { name, size: st.size, mtime: st.mtime.toISOString() };
 }
 
@@ -76,6 +78,7 @@ export function backupPath(name: string): string {
 
 export function deleteBackup(name: string) {
 	fs.unlinkSync(backupPath(name));
+	log('backup', `eliminato ${name}`);
 }
 
 /** Salva un file .db caricato dall'utente nella cartella backup (nome sanificato). */
@@ -88,6 +91,7 @@ export function saveUploadedBackup(originalName: string, data: Buffer): string {
 		.slice(0, 60);
 	const name = `upload-${base || 'backup'}-${stamp()}.db`;
 	fs.writeFileSync(path.join(BACKUP_DIR, name), data);
+	log('backup', `upload salvato come ${name} (${data.length} byte)`);
 	return name;
 }
 
@@ -98,6 +102,7 @@ const TABLES = ['settings', 'brokers', 'instruments', 'transactions', 'prices', 
  *  in un'unica transazione (ATTACH). Copia solo le colonne in comune, così un
  *  backup di una versione precedente dello schema resta ripristinabile. */
 export function restoreBackup(name: string) {
+	log('backup', `restore da ${name} avviato`);
 	const full = backupPath(name);
 
 	// Verifica preliminare: è un DB SQLite con le tabelle attese?
@@ -147,6 +152,7 @@ export function restoreBackup(name: string) {
 		db.exec('DETACH restore');
 	}
 	db.pragma('wal_checkpoint(TRUNCATE)');
+	log('backup', `restore da ${name} completato`);
 }
 
 const CHECK_EVERY = 60 * 60 * 1000; // controllo orario
@@ -155,10 +161,12 @@ const ONE_DAY = 24 * 60 * 60 * 1000;
 /** Backup automatico: almeno una volta al giorno. Controllo orario così i riavvii
  *  del container non saltano mai la finestra. Chiamato una volta da hooks.server.ts. */
 export function startBackupScheduler() {
+	const last = getSetting('last_backup');
+	log('backup', `scheduler avviato (ultimo backup: ${last ?? 'mai'})`);
 	const tick = () => {
 		const last = getSetting('last_backup');
 		if (!last || Date.now() - Date.parse(last) >= ONE_DAY)
-			void createBackup().catch((e) => console.error('backup automatico fallito', e));
+			void createBackup().catch((e) => logError('backup', 'backup automatico fallito', e));
 	};
 	tick();
 	setInterval(tick, CHECK_EVERY);

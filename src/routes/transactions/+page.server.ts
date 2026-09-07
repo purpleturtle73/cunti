@@ -30,7 +30,8 @@ function readTxForm(form: FormData) {
 export const load: PageServerLoad = () => {
 	const rows = db
 		.prepare(
-			`SELECT t.*, i.name AS instrument_name, i.type AS instrument_type, i.currency,
+			`SELECT t.*, i.name AS instrument_name, i.symbol AS instrument_symbol,
+				i.isin AS instrument_isin, i.type AS instrument_type, i.currency,
 				b.name AS broker_name, (b.logo IS NOT NULL) AS broker_has_logo
 			 FROM transactions t
 			 JOIN instruments i ON i.id = t.instrument_id
@@ -48,6 +49,8 @@ export const load: PageServerLoad = () => {
 		notes: string | null;
 		broker_id: number | null;
 		instrument_name: string;
+		instrument_symbol: string;
+		instrument_isin: string | null;
 		instrument_type: string;
 		currency: string;
 		broker_name: string | null;
