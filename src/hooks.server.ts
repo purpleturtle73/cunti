@@ -4,6 +4,7 @@ import { startBackupScheduler } from '$lib/server/backup';
 import { DATA_DIR } from '$lib/server/db';
 import { log } from '$lib/server/log';
 import { startScheduler } from '$lib/server/prices';
+import { APP_VERSION } from '$lib/server/version';
 
 declare global {
 	// eslint-disable-next-line no-var
@@ -12,7 +13,7 @@ declare global {
 
 if (!building && !globalThis.__priceScheduler) {
 	globalThis.__priceScheduler = true;
-	log('server', `avvio: DATA_DIR=${DATA_DIR} PORT=${process.env.PORT ?? '3030'}`);
+	log('server', `avvio: versione=${APP_VERSION} DATA_DIR=${DATA_DIR} PORT=${process.env.PORT ?? '3030'}`);
 	startScheduler();
 	startBackupScheduler();
 }

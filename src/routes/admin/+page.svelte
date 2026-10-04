@@ -30,6 +30,10 @@
 <svelte:head><title>Cunti — Amministrazione</title></svelte:head>
 
 <h1 class="page-title">Amministrazione</h1>
+<p class="app-version">
+	Versione immagine <code title="Release dell'immagine container in esecuzione">{data.version}</code>
+	{#if data.version === 'dev'}<span class="muted">(esecuzione fuori da un'immagine)</span>{/if}
+</p>
 
 <section class="card">
 	<h2>Strumenti</h2>
@@ -834,7 +838,19 @@
 <style>
 	.page-title {
 		font-size: 1.7rem;
-		margin-bottom: 1.2rem;
+		margin-bottom: 0.3rem;
+	}
+	.app-version {
+		margin: 0 0 1.2rem;
+		font-size: 0.85rem;
+		color: var(--ink-3);
+	}
+	.app-version code {
+		background: var(--surface-2);
+		border-radius: 4px;
+		padding: 0.05rem 0.4rem;
+		color: var(--ink-2);
+		font-weight: 600;
 	}
 	section.card {
 		margin-bottom: 1rem;

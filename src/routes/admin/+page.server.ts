@@ -31,6 +31,7 @@ import {
 } from '$lib/server/expenses';
 import { log, logError } from '$lib/server/log';
 import { refreshFx, refreshInstrument } from '$lib/server/prices';
+import { APP_VERSION } from '$lib/server/version';
 import {
 	applyTxStaging,
 	discardTxStaging,
@@ -70,6 +71,7 @@ export const load: PageServerLoad = () => {
 	}
 	const rules = loadRules();
 	return {
+		version: APP_VERSION,
 		backups: listBackups(),
 		brokers,
 		instruments,

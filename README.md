@@ -27,6 +27,8 @@ Il database SQLite vive in `/data/cunti.db` (volume `cunti-data`); i backup auto
 
 L'immagine include un **healthcheck** (`/api/health`, ogni 30 s): `podman ps` mostra lo stato `healthy`/`unhealthy` del container.
 
+La **release in esecuzione** si legge in Amministrazione (sotto il titolo) e in `/api/health` (campo `version`): `1.2.3` per le immagini pubblicate da un tag `v1.2.3`, `main-<sha>` per le build di verifica, `dev` fuori da un'immagine.
+
 ### Podman Quadlet (consigliato — Rocky Linux o qualsiasi distro con systemd)
 
 Rootless, con avvio automatico al boot. Crea `~/.config/containers/systemd/cunti.container`:
@@ -118,7 +120,7 @@ npm run check            # type-check
 npm test                 # unit test (vitest)
 ```
 
-Stack: SvelteKit (Svelte 5) + adapter-node, SQLite (better-sqlite3), grafici SVG custom. Variabili: `DATA_DIR` (default `./data`), `PORT` (default `3030` in produzione).
+Stack: SvelteKit (Svelte 5) + adapter-node, SQLite (better-sqlite3), grafici SVG custom. Variabili: `DATA_DIR` (default `./data`), `PORT` (default `3030` in produzione), `BODY_SIZE_LIMIT` (dimensione massima di un upload; impostata a `200M` nell'immagine, il default di adapter-node è 512 KB e farebbe fallire con 413 import CSV e upload di backup — se lanci `node build/index.js` a mano impostala anche tu).
 
 ### Dati demo
 

@@ -25,6 +25,7 @@ src/
     portfolio.ts               motore: posizioni (PMC), lotti di acquisto (FIFO), serie giornaliera, TWR, periodi, drawdown, conversione EUR
     backup.ts                  backup/restore SQLite, rotazione 10gg, scheduler giornaliero
     staging.ts                 staging generico degli import a due fasi (token UUID, TTL 1h, per dominio)
+    version.ts                 versione dell'immagine (APP_VERSION da env, `dev` fuori da un'immagine)
     transactions.ts            transazioni: import a due fasi, export CSV, svuotamento con backup
     txcsv.ts                   parser CSV import transazioni (puro, testabile)
     tax.ts                     stime fiscali italiane
@@ -44,7 +45,7 @@ src/
     positions/[id]/            dettaglio posizione
     admin/                     amministrazione: strumenti, broker, import/svuota transazioni, spese, backup/restore, report refresh
     api/refresh/+server.ts     POST refresh prezzi manuale
-    api/health/+server.ts      healthcheck (SELECT 1 sul DB)
+    api/health/+server.ts      healthcheck (SELECT 1 sul DB) + versione immagine
     api/backups/[name]/        GET download backup
     api/brokers/[id]/logo/     GET logo broker (BLOB dal DB)
 scripts/make-demo-db.js        genera DATA_DIR/demo-cunti.db con dati generici (uso manuale)
@@ -106,9 +107,15 @@ Cascata (transazioni + prezzi) protetta su due livelli: doppia `confirm` client 
 - Tabella `brokers` (nome unico, logo BLOB + mime, max 512 KB, PNG/JPEG/SVG/WebP); `transactions.broker_id` con `ON DELETE SET NULL` (migrazione via `pragma table_info` per DB esistenti).
 - CRUD nel pannello `/admin` (creazione con logo, cambio logo, eliminazione); selezione broker (opzionale) nel form transazioni; logo servito da `/api/brokers/[id]/logo`.
 
+### Versione dell'immagine
+
+- **Dove si vede**: sotto il titolo di `/admin` («Versione immagine `1.2.3`»), nel JSON di `/api/health` e nel log di avvio (`[server] avvio: versione=…`). Serve a sapere a colpo d'occhio quale release gira dopo un `AutoUpdate` del Quadlet.
+- **Come arriva lì**: la CI calcola la versione (tag `v1.2.3` → `1.2.3`; altrimenti `main-<sha7>`) e la passa come `build-arg APP_VERSION`; il Containerfile la dichiara con `ARG APP_VERSION=dev` **nello stage finale** (l'ARG dello stage di build non è visibile in quello di runtime) e la espone come `ENV`. `lib/server/version.ts` la legge da `process.env` a runtime, non a build time: la build SvelteKit resta identica e la versione dipende solo dall'immagine che la contiene.
+- **Fuori da un'immagine** (`npm run dev`, `node build/index.js` a mano) la variabile non esiste e vale `dev`; l'admin lo segnala con «esecuzione fuori da un'immagine». Un'immagine costruita a mano senza `--build-arg` mostra anch'essa `dev`.
+
 ### Healthcheck
 
-- `GET /api/health` → `SELECT 1` sul DB, 200/500.
+- `GET /api/health` → `SELECT 1` sul DB, 200/500; il JSON include `version` (release dell'immagine, vedi «Versione dell'immagine»).
 - `HEALTHCHECK` nel Containerfile (fetch da Node ogni 30s, start-period 15s); nel Quadlet `Notify=healthy` fa dichiarare "avviato" il servizio systemd solo a healthcheck superato.
 - **Quadlet**: `HealthCmd`/`HealthInterval`/`HealthTimeout`/`HealthStartPeriod`/`HealthRetries` dichiarati anche nell'unit `.container` (README), non solo nell'immagine — `Notify=healthy` valuta l'healthcheck alla creazione del container e senza questi campi fallisce con `sdnotify policy "healthy" requires a healthcheck to be set` (es. immagine pull-ata precedente all'aggiunta dell'HEALTHCHECK, o comunque non affidarsi solo al valore ereditato dall'immagine).
 
@@ -190,6 +197,7 @@ Dettagli di progetto in PLAN_SPESE.md; stato: M1–M3 implementate (2026-07-06).
 
 - push su `main` / PR → job `test` (svelte-check, vitest, build) + job `image` in sola verifica (build senza push).
 - push tag `v*` → test + build + **push su ghcr.io** (`<version>`, `<major>.<minor>`, `latest`), login con `GITHUB_TOKEN`.
+- Step `Compute app version`: calcola `1.2.3` (tag) o `main-<sha7>` e lo passa al Containerfile come `build-arg APP_VERSION`, anche nelle build di verifica non pubblicate.
 
 Deploy: Podman Quadlet con `AutoUpdate=registry` (vedi README).
 
@@ -199,6 +207,16 @@ Deploy: Podman Quadlet con `AutoUpdate=registry` (vedi README).
 - **Spese — rifiniture (M4)**: editor in-app di `categories.json`, budget mensile per categoria, note su movimento, azioni bulk sulla lista movimenti (piano in PLAN_SPESE.md).
 
 ## Changelog
+
+### 2026-10-05 — Fix: upload oltre 512 KB respinti con 413 da adapter-node
+- **Bug**: caricando in `/admin` un CSV da ~1,2 MB il container rispondeva `[413] POST /admin — Content-length of 1215308 exceeds limit of 524288 bytes`. Il limite non era dell'app: **adapter-node scarta i body oltre 512 KB di default** (`BODY_SIZE_LIMIT`) prima che la richiesta arrivi alle action, quindi i limiti applicativi (CSV transazioni 2 MB, CSV spese 20 MB, upload backup 200 MB) non erano mai raggiungibili oltre i 512 KB. Colpiva import CSV e restore da file; i loghi (≤512 KB di contenuto) passavano solo per poco.
+- **Fix**: `ENV BODY_SIZE_LIMIT=200M` nel Containerfile, allineato al più grande dei limiti applicativi (upload backup). Le action continuano a validare la propria soglia, quindi un CSV transazioni da 3 MB viene comunque rifiutato con il messaggio «File troppo grande (max 2 MB)» invece di un 413 muto. Nessuna modifica all'unit Quadlet: basta il pull della nuova immagine. Per chi avvia `node build/index.js` a mano la variabile va impostata a mano (README).
+- Verifiche: riprodotto il 413 con la build di produzione e un CSV da ~1 MB al limite di default; con `BODY_SIZE_LIMIT=200M` la stessa richiesta arriva all'action (risposta applicativa 400 per ticker sconosciuto nel DB vuoto di prova). Non verificato sull'immagine reale: il Containerfile cambia solo un `ENV`, il collaudo è il prossimo tag.
+
+### 2026-10-05 — Versione dell'immagine visibile in Amministrazione
+- `/admin` mostra sotto il titolo la release dell'immagine in esecuzione (es. `1.2.3`); stessa informazione in `/api/health` (campo `version`) e nel log di avvio. Utile dopo un `AutoUpdate` del Quadlet per verificare quale release gira davvero.
+- La versione è fissata alla build: la CI la calcola (`1.2.3` sui tag `v*`, `main-<sha7>` altrimenti) e la passa come `build-arg APP_VERSION`; il Containerfile la porta nello stage finale con `ARG` + `ENV`; `lib/server/version.ts` la legge a runtime. Senza variabile (sviluppo, build manuale senza `--build-arg`) vale `dev`.
+- Verifiche: `svelte-check` 0/0, 79 test verdi. Provata la build di produzione con e senza `APP_VERSION`: health e admin mostrano `1.2.3` nel primo caso e `dev` (con l'avviso «fuori da un'immagine») nel secondo. **Non verificato**: la build reale dell'immagine con `podman build` / GitHub Actions — `ARG`/`ENV` e `build-args` sono standard, ma il primo tag dopo questa modifica è il vero collaudo.
 
 ### 2026-10-04 — Transazioni alla pari delle spese: import a due fasi in /admin, svuotamento, scelta per ticker
 - **Svuota transazioni** (`/admin`, «Transazioni: svuota»): `wipeTransactions()` con backup automatico **prima** del `DELETE`, conferma scritta `ELIMINA` + `confirm()` nativo + guardia server, calco di `wipeExpenses`. Tocca solo `transactions`: strumenti, prezzi, cambi e broker restano (servono al reimport e sono costosi da ricostruire). Completa il ciclo **export → edit → svuota → reimporta** anche per gli investimenti, che prima esisteva solo per le spese.
