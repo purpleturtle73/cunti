@@ -27,6 +27,14 @@ export interface ExpenseCsvResult {
 
 const COLS = ['data_ops', 'data', 'descrizione', 'card', 'importo', 'moneyin', 'moneyout', 'categoria'] as const;
 
+/** Il file ha l'intestazione nel formato di Cunti? Altrimenti serve la mappatura delle colonne. */
+export function isNativeFormat(text: string): boolean {
+	const first = text.replace(/^﻿/, '').split(/\r\n|\r|\n/).find((l) => l.trim() !== '') ?? '';
+	const sep = (first.match(/;/g)?.length ?? 0) >= (first.match(/,/g)?.length ?? 0) ? ';' : ',';
+	const header = splitLine(first, sep).map(normHeader);
+	return (header.includes('data_ops') || header.includes('data')) && header.includes('descrizione') && header.includes('importo');
+}
+
 export function parseExpensesCsv(text: string): ExpenseCsvResult {
 	const errors: string[] = [];
 	const rows: ParsedExpense[] = [];

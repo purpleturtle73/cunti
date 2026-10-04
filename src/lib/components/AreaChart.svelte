@@ -17,8 +17,21 @@
 		points,
 		height = 300,
 		showInvested = true,
-		markers = []
-	}: { points: Point[]; height?: number; showInvested?: boolean; markers?: Marker[] } = $props();
+		markers = [],
+		valueLabel = 'Valore',
+		legendLabel = 'Valore di mercato',
+		ariaLabel = 'Andamento del valore del portafoglio',
+		emptyText = 'Dati insufficienti — aggiungi operazioni e aggiorna i prezzi.'
+	}: {
+		points: Point[];
+		height?: number;
+		showInvested?: boolean;
+		markers?: Marker[];
+		valueLabel?: string; // nel tooltip
+		legendLabel?: string;
+		ariaLabel?: string;
+		emptyText?: string;
+	} = $props();
 
 	const PAD = { top: 14, right: 14, bottom: 28, left: 62 };
 
@@ -53,7 +66,9 @@
 			max += 1;
 		}
 		const padY = (max - min) * 0.07;
-		min = Math.max(0, min - padY);
+		// serie positive (valore di portafoglio): l'asse non scende sotto zero; serie che
+		// vanno in negativo (saldo cumulato) si mostrano per intero, con la linea dello zero
+		min = min >= 0 ? Math.max(0, min - padY) : min - padY;
 		max += padY;
 
 		const x = (i: number) => PAD.left + (i / (points.length - 1)) * w;
@@ -76,7 +91,9 @@
 			return { i, x: x(i), label: fmtDate(points[i].date).slice(3), anchor };
 		});
 
-		return { x, y, line, invLine, area, yTicks, xTicks, w, h };
+		const zeroY = min < 0 && max > 0 ? y(0) : null;
+
+		return { x, y, line, invLine, area, yTicks, xTicks, w, h, zeroY };
 	});
 
 	function onMove(e: PointerEvent) {
@@ -147,7 +164,7 @@
 
 <div class="wrap" bind:clientWidth={width} style:height="{height}px">
 	{#if plot}
-		<svg width={width} {height} role="img" aria-label="Andamento del valore del portafoglio">
+		<svg width={width} {height} role="img" aria-label={ariaLabel}>
 			<defs>
 				<linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
 					<stop offset="0" stop-color="var(--series-1)" stop-opacity="0.32" />
@@ -163,6 +180,9 @@
 				<text x={t.x} y={height - 8} text-anchor={t.anchor} class="tick">{t.label}</text>
 			{/each}
 
+			{#if plot.zeroY != null}
+				<line x1={PAD.left} x2={width - PAD.right} y1={plot.zeroY} y2={plot.zeroY} stroke="var(--ink-3)" stroke-dasharray="3 3" />
+			{/if}
 			<path d={plot.area} fill="url(#areaFill)" />
 			<path d={plot.line} fill="none" stroke="var(--series-1)" stroke-width="2" stroke-linejoin="round" />
 			{#if showInvested && plot.invLine}
@@ -197,20 +217,20 @@
 		{#if hover}
 			<div class="tooltip" style:top="{Math.max(6, hover.py - 64)}px" style={tipRight ? `right: ${width - hover.px + 12}px` : `left: ${hover.px + 12}px`}>
 				<strong>{fmtDate(hover.p.date)}</strong>
-				<span><i style:background="var(--series-1)"></i>Valore {fmtEur(hover.p.value)}</span>
+				<span><i style:background="var(--series-1)"></i>{valueLabel} {fmtEur(hover.p.value)}</span>
 				{#if showInvested && hover.p.invested != null}
 					<span><i class="dash"></i>Investito {fmtEur(hover.p.invested)}</span>
 				{/if}
 			</div>
 		{/if}
 	{:else}
-		<p class="empty">Dati insufficienti — aggiungi transazioni e aggiorna i prezzi.</p>
+		<p class="empty">{emptyText}</p>
 	{/if}
 </div>
 
 {#if showInvested && plot}
 	<div class="legend">
-		<span><i style:background="var(--series-1)"></i>Valore di mercato</span>
+		<span><i style:background="var(--series-1)"></i>{legendLabel}</span>
 		<span><i class="dash"></i>Capitale investito</span>
 	</div>
 {/if}
@@ -248,7 +268,7 @@
 		flex-direction: column;
 		gap: 0.15rem;
 		font-size: 0.8rem;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+		box-shadow: 0 8px 24px var(--shadow);
 		white-space: nowrap;
 		z-index: 2;
 	}

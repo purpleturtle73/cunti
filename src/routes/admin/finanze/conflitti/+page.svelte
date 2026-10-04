@@ -5,7 +5,7 @@
 	let { data, form } = $props();
 </script>
 
-<svelte:head><title>Cunti — Amministrazione · Conflitti</title></svelte:head>
+<svelte:head><title>Cunti — Admin · Conflitti</title></svelte:head>
 
 <section class="card">
 	<div class="sec-head">
@@ -14,11 +14,11 @@
 			<span class="muted sub-h">({data.total.toLocaleString('it-IT')} voci)</span>
 		</h2>
 		<nav class="views" aria-label="Vista">
-			<a href="/admin/spese/conflitti" class={{ active: !data.locked }} aria-current={!data.locked ? 'page' : undefined}>
+			<a href="/admin/finanze/conflitti" class={{ active: !data.locked }} aria-current={!data.locked ? 'page' : undefined}>
 				Da rivedere{!data.locked ? '' : ` (${data.otherCount.toLocaleString('it-IT')})`}
 			</a>
 			<a
-				href="/admin/spese/conflitti?vista=bloccate"
+				href="/admin/finanze/conflitti?vista=bloccate"
 				class={{ active: data.locked }}
 				aria-current={data.locked ? 'page' : undefined}
 			>
@@ -36,7 +36,7 @@
 			coppia «attuale → regole». <strong>Applica regola</strong> cambia la categoria;
 			<strong>Tieni la mia</strong> la blocca, e da quel momento le regole non la toccano più. Se un
 			gruppo intero è sbagliato, spesso conviene correggere la keyword in
-			<a class="link" href="/admin/spese/categorie">Categorie</a>.
+			<a class="link" href="/admin/finanze/categorie">Categorie</a>.
 		{/if}
 	</p>
 
@@ -172,7 +172,7 @@
 		background: var(--surface-2);
 	}
 	.pair code.rule {
-		color: #86b6ef;
+		color: var(--accent-ink);
 	}
 	.arrow {
 		color: var(--ink-3);
@@ -200,10 +200,10 @@
 		text-overflow: ellipsis;
 	}
 	td.neg {
-		color: #f0a3a3;
+		color: var(--bad-ink);
 	}
 	td.pos {
-		color: #7fd67f;
+		color: var(--good-ink);
 	}
 	.item-actions {
 		display: inline-flex;

@@ -1,5 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { allBrokers, allInstruments, db, getSetting, type Instrument } from '$lib/server/db';
+import { createDemoInvestments, hasTransactions } from '$lib/server/demo';
 import { log, logError } from '$lib/server/log';
 import { refreshFx, refreshInstrument } from '$lib/server/prices';
 import {
@@ -12,7 +13,7 @@ import { parseTransactionsCsv } from '$lib/server/txcsv';
 import { LOGO_MAX_BYTES, LOGO_MIMES, TX_CSV_MAX_BYTES } from '$lib/server/uploads';
 import type { Actions, PageServerLoad } from './$types';
 
-/** Amministrazione → Transazioni: strumenti, broker, import/svuotamento transazioni,
+/** Admin → Investimenti: strumenti, broker, import/svuotamento delle operazioni,
  *  esito dell'ultimo aggiornamento prezzi. */
 export const load: PageServerLoad = () => {
 	const brokers = db
@@ -37,10 +38,23 @@ export const load: PageServerLoad = () => {
 	} catch {
 		refreshReport = [];
 	}
-	return { brokers, instruments, refreshReport, lastRefresh: getSetting('last_refresh') };
+	return { brokers, instruments, refreshReport, lastRefresh: getSetting('last_refresh'), hasOperations: hasTransactions() };
 };
 
 export const actions: Actions = {
+	createDemo: async () => {
+		const rep = createDemoInvestments();
+		if (!rep)
+			return fail(400, {
+				section: 'demo',
+				error: 'Ci sono già operazioni: i dati demo si creano solo su una sezione vuota (svuotala prima, con backup automatico).'
+			});
+		return {
+			section: 'demo',
+			success: `Dati demo creati: ${rep.instruments} strumenti con ${rep.prices.toLocaleString('it-IT')} prezzi sintetici, ${rep.operations} operazioni.`
+		};
+	},
+
 	createInstrument: async ({ request }) => {
 		const form = await request.formData();
 		const type = String(form.get('type'));
@@ -107,7 +121,7 @@ export const actions: Actions = {
 		if (txCount > 0 && form.get('force') !== '1')
 			return fail(400, {
 				section: 'instruments',
-				error: `"${inst.symbol}" ha ${txCount} transazioni: eliminazione non confermata.`
+				error: `"${inst.symbol}" ha ${txCount} operazioni: eliminazione non confermata.`
 			});
 		db.prepare('DELETE FROM instruments WHERE id = ?').run(id);
 		log('instruments', `eliminato ${inst.symbol} (id ${id}) con ${txCount} transazioni`);
@@ -191,7 +205,7 @@ export const actions: Actions = {
 	},
 
 
-	// ---------- Transazioni: import CSV a due fasi, svuotamento ----------
+	// ---------- Investimenti: import CSV a due fasi, svuotamento ----------
 
 	importTransactions: async ({ request }) => {
 		const form = await request.formData();
@@ -252,7 +266,7 @@ export const actions: Actions = {
 			const n = await wipeTransactions();
 			return {
 				section: 'tx-dati',
-				success: `Eliminate ${n} transazioni (backup creato prima dello svuotamento).`
+				success: `Eliminate ${n} operazioni (backup creato prima dello svuotamento).`
 			};
 		} catch (e) {
 			logError('transazioni', 'svuotamento transazioni fallito', e);

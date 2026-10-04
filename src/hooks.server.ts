@@ -1,5 +1,6 @@
 import type { Handle } from '@sveltejs/kit';
 import { building } from '$app/environment';
+import { redirectTarget } from '$lib/legacy-routes';
 import { startBackupScheduler } from '$lib/server/backup';
 import { DATA_DIR } from '$lib/server/db';
 import { log } from '$lib/server/log';
@@ -23,7 +24,10 @@ if (!building && !globalThis.__priceScheduler) {
 // qui, quindi non sporcano il log.
 export const handle: Handle = async ({ event, resolve }) => {
 	const start = Date.now();
-	const response = await resolve(event);
+	const target = ['GET', 'HEAD'].includes(event.request.method) ? redirectTarget(event.url.pathname) : null;
+	const response = target
+		? new Response(null, { status: target.status, headers: { location: target.location + event.url.search } })
+		: await resolve(event);
 	log(
 		'http',
 		`${event.request.method} ${event.url.pathname}${event.url.search} → ${response.status} (${Date.now() - start}ms)`

@@ -24,7 +24,7 @@
 	let totalKeywords = $derived(data.categories.reduce((s, c) => s + c.keywords.length, 0));
 </script>
 
-<svelte:head><title>Cunti — Amministrazione · Categorie</title></svelte:head>
+<svelte:head><title>Cunti — Admin · Categorie</title></svelte:head>
 
 {#snippet feedback(target: string)}
 	{@const f = msgFor(target)}
@@ -72,7 +72,7 @@
 	{/if}
 	{#if data.conflicts > 0}
 		<p class="hint">
-			<a class="link" href="/admin/spese/conflitti">{data.conflicts.toLocaleString('it-IT')} voci in conflitto con le regole →</a>
+			<a class="link" href="/admin/finanze/conflitti">{data.conflicts.toLocaleString('it-IT')} voci in conflitto con le regole →</a>
 		</p>
 	{/if}
 </section>
@@ -109,7 +109,7 @@
 					const mode = new FormData(e.currentTarget).get('mode');
 					if (
 						mode === 'replace' &&
-						!confirm('Sostituire TUTTE le categorie e keyword con quelle del file? Le spese non vengono toccate. Viene creato un backup prima.')
+						!confirm('Sostituire TUTTE le categorie e keyword con quelle del file? I movimenti non vengono toccati. Viene creato un backup prima.')
 					)
 						e.preventDefault();
 				}}
@@ -242,7 +242,7 @@
 
 {#if data.undefinedUsed.length > 0}
 	<section class="card">
-		<h2>Usate dalle spese ma non definite <span class="muted sub-h">({data.undefinedUsed.length})</span></h2>
+		<h2>Usate dai movimenti ma non definite <span class="muted sub-h">({data.undefinedUsed.length})</span></h2>
 		<p class="muted">
 			Categorie arrivate dagli import CSV o assegnate a mano. Puoi definirle (per dar loro keyword e
 			icona) oppure unirle in una categoria esistente.

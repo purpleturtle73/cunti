@@ -1,6 +1,34 @@
 import { fail } from '@sveltejs/kit';
 import { allBrokers, allInstruments, db } from '$lib/server/db';
+import { buildSnapshot } from '$lib/server/portfolio';
+import { buildTaxSummary } from '$lib/server/tax';
 import type { Actions, PageServerLoad } from './$types';
+
+export interface TxMarker {
+	date: string;
+	type: 'buy' | 'sell';
+	assetType: 'etf' | 'crypto';
+	label: string; // "3 × iShares Core MSCI World (SWDA.MI)"
+}
+
+export interface OperationRow {
+	id: number;
+	instrument_id: number;
+	type: 'buy' | 'sell';
+	date: string;
+	quantity: number;
+	price: number;
+	fee: number;
+	notes: string | null;
+	broker_id: number | null;
+	instrument_name: string;
+	instrument_symbol: string;
+	instrument_isin: string | null;
+	instrument_type: string;
+	currency: string;
+	broker_name: string | null;
+	broker_has_logo: 0 | 1;
+}
 
 function readTxForm(form: FormData) {
 	const instrument_id = Number(form.get('instrument_id'));
@@ -25,8 +53,28 @@ function readTxForm(form: FormData) {
 	return { values: { instrument_id, type, date, quantity, price, fee, notes, broker_id } };
 }
 
-export const load: PageServerLoad = () => {
-	const rows = db
+/** Operazioni per pagina nello storico. */
+const OPS_PER_PAGE = 100;
+
+export const load: PageServerLoad = ({ url }) => {
+	const snapshot = buildSnapshot();
+	const brokers = allBrokers();
+	const tax = buildTaxSummary(snapshot.positions, new Map(brokers.map((b) => [b.id, b.name])));
+	const txMarkers = db
+		.prepare(
+			`SELECT t.date, t.type, i.type AS assetType,
+				(t.quantity || ' × ' || i.name || ' (' || i.symbol || ')') AS label
+			 FROM transactions t JOIN instruments i ON i.id = t.instrument_id
+			 ORDER BY t.date, t.id`
+		)
+		.all() as TxMarker[];
+
+	// storico paginato; una pagina fuori intervallo ricade sull'ultima valida
+	const total = (db.prepare('SELECT COUNT(*) AS c FROM transactions').get() as { c: number }).c;
+	const pages = Math.max(1, Math.ceil(total / OPS_PER_PAGE));
+	const pageParam = Number.parseInt(url.searchParams.get('pag') ?? '1', 10);
+	const page = Math.min(pages, Math.max(1, Number.isFinite(pageParam) ? pageParam : 1));
+	const operations = db
 		.prepare(
 			`SELECT t.*, i.name AS instrument_name, i.symbol AS instrument_symbol,
 				i.isin AS instrument_isin, i.type AS instrument_type, i.currency,
@@ -34,27 +82,20 @@ export const load: PageServerLoad = () => {
 			 FROM transactions t
 			 JOIN instruments i ON i.id = t.instrument_id
 			 LEFT JOIN brokers b ON b.id = t.broker_id
-			 ORDER BY t.date DESC, t.id DESC`
+			 ORDER BY t.date DESC, t.id DESC
+			 LIMIT ? OFFSET ?`
 		)
-		.all() as {
-		id: number;
-		instrument_id: number;
-		type: 'buy' | 'sell';
-		date: string;
-		quantity: number;
-		price: number;
-		fee: number;
-		notes: string | null;
-		broker_id: number | null;
-		instrument_name: string;
-		instrument_symbol: string;
-		instrument_isin: string | null;
-		instrument_type: string;
-		currency: string;
-		broker_name: string | null;
-		broker_has_logo: 0 | 1;
-	}[];
-	return { transactions: rows, instruments: allInstruments(), brokers: allBrokers() };
+		.all(OPS_PER_PAGE, (page - 1) * OPS_PER_PAGE) as OperationRow[];
+
+	return {
+		snapshot,
+		tax,
+		txMarkers,
+		operations,
+		opsPagination: { page, pages, total, perPage: OPS_PER_PAGE },
+		instruments: allInstruments(),
+		brokers
+	};
 };
 
 const insertTx = () =>
@@ -75,7 +116,7 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const id = Number(form.get('id'));
 		if (!id || !db.prepare('SELECT 1 FROM transactions WHERE id = ?').get(id))
-			return fail(400, { error: 'Transazione inesistente.' });
+			return fail(400, { error: 'Operazione inesistente.' });
 		const parsed = readTxForm(form);
 		if ('error' in parsed) return fail(400, { error: parsed.error });
 		const v = parsed.values;
@@ -96,7 +137,7 @@ export const actions: Actions = {
 				 FROM transactions WHERE id = ?`
 			)
 			.run(id);
-		if (info.changes === 0) return fail(400, { error: 'Transazione inesistente.' });
+		if (info.changes === 0) return fail(400, { error: 'Operazione inesistente.' });
 		return { success: true, duplicatedId: Number(info.lastInsertRowid) };
 	},
 

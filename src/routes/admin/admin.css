@@ -41,12 +41,16 @@
 	font-size: 0.85rem;
 }
 .admin-area .ok {
-	color: #7fd67f;
+	color: var(--good-ink);
 	margin: 0.8rem 0 0;
 	font-size: 0.85rem;
 }
 .admin-area .scroll-x {
 	overflow-x: auto;
+}
+.admin-area span.small {
+	margin-left: 0.7rem;
+	font-size: 0.8rem;
 }
 .admin-area .inst-form {
 	display: grid;
@@ -223,6 +227,91 @@
 .admin-area .cancel-form {
 	margin-top: 0.5rem;
 }
+
+/* import con mappatura delle colonne */
+.admin-area .mapping {
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-sm);
+	padding: 0.9rem 1rem;
+	margin-bottom: 0.6rem;
+}
+.admin-area .mapping .sample {
+	margin: 0.6rem 0 1rem;
+	max-height: 230px;
+	overflow: auto;
+}
+.admin-area .mapping .sample td {
+	max-width: 220px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-size: 0.8rem;
+}
+.admin-area .map-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+	gap: 0.9rem 1.2rem;
+}
+.admin-area .map-group {
+	display: flex;
+	flex-direction: column;
+	gap: 0.55rem;
+	padding: 0.7rem 0.8rem;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--surface-2);
+}
+.admin-area .map-group select,
+.admin-area .map-group input[type='text'] {
+	width: 100%;
+	min-width: 0;
+}
+.admin-area .field-label {
+	font-size: 0.75rem;
+	color: var(--ink-3);
+	text-transform: uppercase;
+	letter-spacing: 0.07em;
+}
+.admin-area .inline-field {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+}
+.admin-area .inline-field input[type='number'] {
+	width: 5rem;
+}
+.admin-area .small-note {
+	margin: 0;
+	font-size: 0.75rem;
+}
+.admin-area .profiles {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+	margin-top: 0.8rem;
+	font-size: 0.82rem;
+}
+.admin-area .profile-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	padding: 0.15rem 0.3rem 0.15rem 0.65rem;
+	border: 1px solid var(--border-strong);
+	border-radius: 999px;
+}
+.admin-area .chip-x {
+	background: none;
+	border: none;
+	color: var(--ink-3);
+	cursor: pointer;
+	font-size: 0.75rem;
+	padding: 0.1rem 0.3rem;
+	border-radius: 999px;
+}
+.admin-area .chip-x:hover {
+	color: var(--bad);
+	background: var(--hover);
+}
 .admin-area .bulk-choice {
 	display: flex;
 	gap: 0.6rem;
@@ -236,7 +325,7 @@
 	font-size: 0.8rem;
 }
 .admin-area .ok-text {
-	color: #7fd67f;
+	color: var(--good-ink);
 }
 .admin-area .warn-text,
 .admin-area .warning {
@@ -327,7 +416,7 @@
 }
 .admin-area .btn.danger {
 	background: rgba(230, 103, 103, 0.15);
-	color: #f0a3a3;
+	color: var(--bad-ink);
 	border: 1px solid rgba(230, 103, 103, 0.4);
 }
 .admin-area .btn.danger:hover {
@@ -363,11 +452,11 @@
 	opacity: 0.6;
 }
 .admin-area .admin-tab:hover {
-	background: rgba(255, 255, 255, 0.05);
+	background: var(--hover);
 	color: var(--ink);
 }
 .admin-area .admin-tab.active {
-	background: linear-gradient(120deg, rgba(57, 135, 229, 0.18), rgba(144, 133, 233, 0.14));
+	background: var(--selected);
 	box-shadow: inset 0 0 0 1px rgba(57, 135, 229, 0.35);
 	color: var(--ink);
 }

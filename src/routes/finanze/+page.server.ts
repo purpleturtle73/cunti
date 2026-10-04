@@ -1,22 +1,30 @@
 import { fail } from '@sveltejs/kit';
-import { loadMeta, transferCategories } from '$lib/server/categorize';
+import { listCategoryDefs, loadMeta, transferCategories } from '$lib/server/categorize';
 import { allCards, db, type Expense } from '$lib/server/db';
 import {
+	balanceSeries,
+	budgetStatus,
 	cardTotals,
 	categoryTotals,
 	categorySummaries,
 	categoryTrend,
 	coverage,
+	createRuleFromMovement,
 	distinctCards,
 	expenseYears,
+	filterConditions,
+	filteredInOut,
 	monthlyInOut,
 	monthsInPeriod,
+	listBudgets,
 	recurring,
-	yearlyInOut
+	setBudgets,
+	yearlyInOut,
+	type ExpenseFilters
 } from '$lib/server/expenses';
 import type { Actions, PageServerLoad } from './$types';
 
-const MOVEMENTS_LIMIT = 300;
+const MOVEMENTS_LIMIT = 100;
 
 /** Colonne ordinabili: whitelist, l'ORDER BY è interpolato nella query. */
 const SORTS = {
@@ -60,45 +68,21 @@ export const load: PageServerLoad = ({ url }) => {
 	const dir = url.searchParams.get('dir') === 'asc' ? 'asc' : 'desc';
 
 	// movimenti filtrati
-	const where: string[] = [];
-	const params: unknown[] = [];
-	if (year) {
-		where.push("substr(date, 1, 4) = ?");
-		params.push(year);
-	}
-	if (month) {
-		where.push("substr(date, 6, 2) = ?");
-		params.push(month);
-	}
-	if (category) {
-		where.push('category = ?');
-		params.push(category);
-	}
-	if (card) {
-		where.push('card = ?');
-		params.push(card);
-	}
-	if (exCategories.length > 0) {
-		where.push(`category NOT IN (${exCategories.map(() => '?').join(',')})`);
-		params.push(...exCategories);
-	}
-	if (exCards.length > 0) {
-		where.push(`card NOT IN (${exCards.map(() => '?').join(',')})`);
-		params.push(...exCards);
-	}
-	if (q) {
-		where.push("instr(lower(description), lower(?)) > 0");
-		params.push(q);
-	}
+	const filters: ExpenseFilters = { year, month, category, card, q, exCategories, exCards };
+	const { where, params } = filterConditions(filters);
 	const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 	// SORTS è una whitelist: `sort` non può contenere input arbitrario
 	const orderSql = `ORDER BY ${SORTS[sort]} ${dir === 'asc' ? 'ASC' : 'DESC'}, id DESC`;
-	const movements = db
-		.prepare(`SELECT * FROM expenses ${whereSql} ${orderSql} LIMIT ${MOVEMENTS_LIMIT}`)
-		.all(...params) as Expense[];
 	const movementsTotal = (
 		db.prepare(`SELECT COUNT(*) AS c FROM expenses ${whereSql}`).get(...params) as { c: number }
 	).c;
+	// pagine da MOVEMENTS_LIMIT righe; una pagina fuori intervallo ricade sull'ultima valida
+	const pages = Math.max(1, Math.ceil(movementsTotal / MOVEMENTS_LIMIT));
+	const pageParam = Number.parseInt(url.searchParams.get('pag') ?? '1', 10);
+	const pageNo = Math.min(pages, Math.max(1, Number.isFinite(pageParam) ? pageParam : 1));
+	const movements = db
+		.prepare(`SELECT * FROM expenses ${whereSql} ${orderSql} LIMIT ? OFFSET ?`)
+		.all(...params, MOVEMENTS_LIMIT, (pageNo - 1) * MOVEMENTS_LIMIT) as Expense[];
 
 	// dashboard
 	const yearly = yearlyInOut(transfers);
@@ -109,7 +93,8 @@ export const load: PageServerLoad = ({ url }) => {
 	const prevPrefix = prevYear ? (month ? `${prevYear}-${month}` : prevYear) : '';
 	const catTotalsPrev = prevPrefix ? categoryTotals(prevPrefix) : [];
 
-	// tiles: mese corrente e YTD
+	// tiles: entrate/uscite del periodo con i filtri; saldo e top categoria su oggi
+	const inOut = filteredInOut(transfers, filters);
 	const now = new Date().toISOString().slice(0, 10);
 	const curMonth = now.slice(0, 7);
 	const curYear = now.slice(0, 4);
@@ -121,13 +106,26 @@ export const load: PageServerLoad = ({ url }) => {
 
 	const cov = coverage(periodPrefix);
 
+	// la tile "Ricorrenti attive" parla di oggi e resta globale; la card segue i filtri
+	const activeRecurring = recurring(transfers).filter((r) => r.active);
+	const defs = listCategoryDefs();
+	const budgets = listBudgets();
+
 	return {
 		years,
-		filters: { year, month, category, card, q, exCategories, exCards },
+		filters,
 		sort: { key: sort, dir },
 		movements,
 		movementsTotal,
 		limit: MOVEMENTS_LIMIT,
+		pagination: { page: pageNo, pages },
+		// categorie definite (con regole): le sole a cui si può aggiungere una keyword
+		definedCategories: defs.map((c) => c.name),
+		budget: budgetStatus(year, month),
+		// categorie a cui si può dare un budget: definite e non giroconti
+		budgetCategories: defs
+			.filter((c) => !c.transfer)
+			.map((c) => ({ name: c.name, monthly: budgets.get(c.name) ?? null })),
 		yearly,
 		monthly,
 		catTotals,
@@ -137,14 +135,20 @@ export const load: PageServerLoad = ({ url }) => {
 		coverage: cov,
 		cardTotals: cardTotals(periodPrefix, transfers),
 		categoryTrend: category ? categoryTrend(category, year) : [],
-		recurring: recurring(transfers),
+		balance: balanceSeries(transfers, filters),
+		recurring: recurring(transfers, filters),
+		recurringOutflow: inOut.moneyOut,
+		recurringActive: {
+			count: activeRecurring.length,
+			monthly: activeRecurring.reduce((s, r) => s + r.amount, 0)
+		},
 		summaries: categorySummaries(),
 		cards: distinctCards(),
 		cardLogos: allCards(),
 		meta,
 		tiles: {
-			monthOut: sumNT(tileMonth, 'moneyOut'),
-			monthIn: sumNT(tileMonth, 'moneyIn'),
+			periodIn: inOut.moneyIn,
+			periodOut: inOut.moneyOut,
 			ytdIn: sumNT(tileYear, 'moneyIn'),
 			ytdOut: sumNT(tileYear, 'moneyOut'),
 			topCatMonth: topCatMonth ? { name: topCatMonth.category, out: topCatMonth.moneyOut } : null,
@@ -170,6 +174,40 @@ export const actions: Actions = {
 			.run(category, manual, id);
 		if (res.changes === 0) return fail(400, { section: 'movimenti', error: 'Voce inesistente.' });
 		return { section: 'movimenti', success: true };
+	},
+
+	saveBudgets: async ({ request }) => {
+		const form = await request.formData();
+		const allowed = new Set(listCategoryDefs().filter((c) => !c.transfer).map((c) => c.name));
+		const entries = new Map<string, number | null>();
+		for (const [name, value] of form.entries()) {
+			if (!name.startsWith('b:')) continue;
+			const category = name.slice(2);
+			if (!allowed.has(category)) continue;
+			const raw = String(value).trim().replace(/\s/g, '').replace(',', '.');
+			if (raw === '') {
+				entries.set(category, null);
+				continue;
+			}
+			const n = Number(raw);
+			if (!Number.isFinite(n) || n < 0)
+				return fail(400, { section: 'budget', error: `Budget non valido per "${category}": usa un importo in euro (vuoto = nessun budget).` });
+			entries.set(category, n);
+		}
+		const set = setBudgets(entries);
+		return { section: 'budget', success: `Budget salvati: ${set} categorie con un budget mensile.` };
+	},
+
+	createRule: async ({ request }) => {
+		const form = await request.formData();
+		const id = Number(form.get('id'));
+		const category = String(form.get('category') || '').trim();
+		if (!id || !category) return fail(400, { section: 'regola', error: 'Scegli keyword e categoria.' });
+		const res = createRuleFromMovement(id, String(form.get('keyword') || ''), category, form.get('apply') === 'on');
+		if (!res.ok) return fail(400, { section: 'regola', error: res.error });
+		const parts = [`Keyword "${res.keyword}" aggiunta a "${category}"`];
+		if (form.get('apply') === 'on') parts.push(`${res.applied} voci senza categoria categorizzate`);
+		return { section: 'regola', success: parts.join(': ') + '.', newConflicts: res.newConflicts };
 	},
 
 	unlockCategory: async ({ request }) => {

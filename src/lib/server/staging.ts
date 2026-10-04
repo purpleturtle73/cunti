@@ -12,7 +12,7 @@ import path from 'node:path';
 import { DATA_DIR } from './db';
 
 /** Domini che usano lo staging. Ognuno ha la sua sottocartella. */
-export type StagingKind = 'spese' | 'transazioni';
+export type StagingKind = 'spese' | 'transazioni' | 'mappatura';
 
 // Funzioni, non costanti: i test impostano DATA_DIR prima dell'import del modulo db.
 const STAGING_ROOT = () => path.join(DATA_DIR, 'import-staging');
@@ -21,7 +21,7 @@ const STAGING_DIR = (kind: StagingKind) => path.join(STAGING_ROOT(), kind);
 const STAGING_TTL_MS = 60 * 60 * 1000; // 1 ora
 const TOKEN_RE = /^[0-9a-f-]{36}$/; // forma UUID: anche guardia contro path traversal
 
-const KINDS: StagingKind[] = ['spese', 'transazioni'];
+const KINDS: StagingKind[] = ['spese', 'transazioni', 'mappatura'];
 
 function stagingPath(kind: StagingKind, token: string): string | null {
 	if (!TOKEN_RE.test(token)) return null;

@@ -101,6 +101,22 @@ CREATE TABLE IF NOT EXISTS expense_keywords (
 -- renderebbero il match ambiguo
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kw_unique ON expense_keywords(keyword COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_kw_category ON expense_keywords(category);
+
+-- Budget mensile di spesa per categoria (uscite). Segue la categoria se rinominata,
+-- sparisce se la categoria viene eliminata.
+CREATE TABLE IF NOT EXISTS budgets (
+	category TEXT PRIMARY KEY REFERENCES expense_categories(name) ON DELETE CASCADE ON UPDATE CASCADE,
+	monthly REAL NOT NULL CHECK (monthly > 0)
+);
+
+-- Profili di import CSV: come leggere l'export di una banca (mappatura delle colonne).
+-- signature = intestazione normalizzata, per riconoscere il formato al caricamento.
+CREATE TABLE IF NOT EXISTS import_profiles (
+	name TEXT PRIMARY KEY,
+	signature TEXT NOT NULL,
+	mapping TEXT NOT NULL,
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
 
 // Migrazione: flag "categoria impostata a mano" sulle spese. Le voci bloccate non

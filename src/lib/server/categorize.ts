@@ -3,7 +3,7 @@
  *
  * Tabelle `expense_categories` (nome, icona, colore, flag giroconto, ordine) ed
  * `expense_keywords` (una keyword appartiene a una sola categoria). Gestite dalla UI
- * in Amministrazione → Categorie; il JSON serve solo per import iniziale ed export.
+ * in Admin → Finanze → Categorie; il JSON serve solo per import iniziale ed export.
  *
  * Match (stessa semantica dello script Python storico): substring senza maiuscole
  * sulla descrizione, vince la keyword più lunga; a parità vince la categoria che
@@ -289,6 +289,8 @@ export function renameCategory(
 			db.prepare(
 				'UPDATE expense_categories SET icon = COALESCE(icon, ?), color = COALESCE(color, ?) WHERE name = ?'
 			).run(o.icon, o.color, newName);
+			// il budget della categoria assorbita passa alla destinazione se questa non ne ha uno
+			db.prepare('INSERT OR IGNORE INTO budgets (category, monthly) SELECT ?, monthly FROM budgets WHERE category = ?').run(newName, oldName);
 			db.prepare('DELETE FROM expense_categories WHERE name = ?').run(oldName);
 		} else if (oldDefined) {
 			// ON UPDATE CASCADE porta con sé le keyword

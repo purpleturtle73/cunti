@@ -17,7 +17,7 @@
 	}
 </script>
 
-<svelte:head><title>Cunti — Amministrazione · Transazioni</title></svelte:head>
+<svelte:head><title>Cunti — Admin · Investimenti</title></svelte:head>
 
 <section class="card">
 	<h2>Strumenti</h2>
@@ -139,7 +139,7 @@
 											return;
 										}
 										if (inst.tx_count > 0) {
-											if (!confirm(`ATTENZIONE: verranno eliminate anche le ${inst.tx_count} transazioni di ${inst.name} e tutto lo storico prezzi. Confermi definitivamente?`)) {
+											if (!confirm(`ATTENZIONE: verranno eliminate anche le ${inst.tx_count} operazioni di ${inst.name} e tutto lo storico prezzi. Confermi definitivamente?`)) {
 												e.preventDefault();
 												return;
 											}
@@ -229,7 +229,7 @@
 </section>
 
 <section class="card">
-	<h2>Transazioni: importa CSV</h2>
+	<h2>Investimenti: importa CSV</h2>
 	{#if form?.section === 'tx-import' && form.txPreview}
 		{@const p = form.txPreview}
 		<div class="preview">
@@ -298,7 +298,7 @@
 		</form>
 		{#if form?.section === 'tx-import' && form.txApplied}
 			<p class="ok">
-				Import applicato: {form.txApplied.inserted} transazioni inserite{form.txApplied.skipped > 0
+				Import applicato: {form.txApplied.inserted} operazioni inserite{form.txApplied.skipped > 0
 					? `, ${form.txApplied.skipped} saltate come duplicate`
 					: ''}.
 			</p>
@@ -320,7 +320,7 @@
 			se presente vince sul simbolo, e se i due indicano strumenti diversi la riga è un errore.
 			<strong>tipo</strong> = <code>acquisto</code>/<code>vendita</code> (o buy/sell),
 			<strong>broker</strong> = nome esistente. Nulla viene scritto prima della conferma; le righe
-			identiche a transazioni già presenti (stesso strumento, tipo, data, quantità, prezzo e
+			identiche a operazioni già presenti (stesso strumento, tipo, data, quantità, prezzo e
 			commissioni) vengono saltate, quindi reimportare lo stesso file è idempotente. Con errori di
 			formato non viene importato nulla.
 		</p>
@@ -361,8 +361,25 @@
 	{/if}
 </section>
 
+<section class="card" id="demo">
+	<h2>Investimenti: dati demo</h2>
+	<p class="muted">
+		Due ETF e una crypto finti (simboli <code>DEMO…</code>, esclusi dall'aggiornamento prezzi) con circa due anni
+		di prezzi sintetici, due broker, un PAC mensile di 18 rate, acquisti crypto e una vendita. Solo con la sezione
+		vuota: i dati demo non si mescolano a quelli veri. Per toglierli: svuota la sezione ed elimina gli strumenti demo.
+	</p>
+	{#if form?.section === 'demo'}
+		{#if form.error}<p class="error">{form.error}</p>{/if}
+		{#if 'success' in (form ?? {}) && form.success}<p class="ok">{form.success}</p>{/if}
+	{/if}
+	<form method="POST" action="?/createDemo" use:enhance>
+		<button class="btn" type="submit" disabled={data.hasOperations}>Crea dati demo</button>
+		{#if data.hasOperations}<span class="muted small">Ci sono già operazioni: svuota prima la sezione.</span>{/if}
+	</form>
+</section>
+
 <section class="card danger-zone">
-	<h2>Transazioni: svuota</h2>
+	<h2>Investimenti: svuota</h2>
 	<p class="muted">
 		Per la modifica di massa: <a class="link" href="/api/transactions/export" download>esporta il CSV</a>,
 		modificalo, svuota qui e reimporta. Prima dello svuotamento viene creato automaticamente un backup
@@ -378,10 +395,10 @@
 		use:enhance
 		class="wipe-form"
 		onsubmit={(e) => {
-			if (!confirm('Eliminare TUTTE le transazioni? Viene creato un backup prima.')) e.preventDefault();
+			if (!confirm('Eliminare TUTTE le operazioni? Viene creato un backup prima.')) e.preventDefault();
 		}}
 	>
 		<input type="text" name="confirm" placeholder="scrivi ELIMINA" required />
-		<button class="btn danger" type="submit">Svuota tutte le transazioni</button>
+		<button class="btn danger" type="submit">Svuota tutte le operazioni</button>
 	</form>
 </section>

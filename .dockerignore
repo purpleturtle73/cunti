@@ -2,7 +2,6 @@ node_modules
 .svelte-kit
 build
 data
-data-demo
 tmp
 .venv
 .git
@@ -11,3 +10,4 @@ tmp
 *.log
 *.db*
 README.md
+dist

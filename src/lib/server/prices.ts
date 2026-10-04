@@ -7,6 +7,7 @@ import {
 	upsertPrices,
 	type Instrument
 } from './db';
+import { isDemoSymbol } from './demo';
 import { log, logError } from './log';
 
 // UA minimale: quelli browser completi vengono spesso bloccati (429) da Yahoo
@@ -109,6 +110,8 @@ export async function refreshAll(full = false): Promise<RefreshReport> {
 			logError('prices', 'EURUSD fallito', e);
 		}
 		for (const inst of instruments) {
+			// strumenti demo: prezzi sintetici, non esistono su Yahoo/CoinGecko
+			if (isDemoSymbol(inst.symbol)) continue;
 			try {
 				const points = await refreshInstrument(inst, full);
 				report.results.push({ symbol: inst.symbol, ok: true, points });

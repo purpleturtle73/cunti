@@ -1,8 +1,37 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import Pager from '$lib/components/Pager.svelte';
+	import type { Broker, Instrument } from '$lib/server/db';
 	import { fmtCurrency, fmtDate } from '$lib/format';
+	import type { ActionData } from './$types';
+	import type { OperationRow } from './+page.server';
 
-	let { data, form } = $props();
+	// Inserimento e storico delle operazioni di acquisto/vendita: le action vivono nel
+	// +page.server.ts di Investimenti, i form qui puntano a "?/create" ecc.
+	let {
+		data,
+		form
+	}: {
+		data: {
+			operations: OperationRow[];
+			opsPagination: { page: number; pages: number; total: number; perPage: number };
+			instruments: Instrument[];
+			brokers: Broker[];
+		};
+		form: ActionData;
+	} = $props();
+
+	function goPage(n: number) {
+		const p = new URLSearchParams(page.url.searchParams);
+		if (n <= 1) p.delete('pag');
+		else p.set('pag', String(n));
+		goto(`/investimenti?${p}`, { keepFocus: true, noScroll: true }).then(() =>
+			document.getElementById('storico-operazioni')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+		);
+	}
+	let opsFrom = $derived((data.opsPagination.page - 1) * data.opsPagination.perPage + 1);
 
 	let today = new Date().toISOString().slice(0, 10);
 
@@ -39,14 +68,10 @@
 	</span>
 {/snippet}
 
-<svelte:head><title>Cunti — Transazioni</title></svelte:head>
-
-<h1 class="page-title">Transazioni</h1>
-
-<section class="card">
+<section class="card" id="nuova-operazione">
 	<h2>Nuova operazione</h2>
 	{#if data.instruments.length === 0}
-		<p class="muted">Prima <a class="link" href="/admin/transazioni">aggiungi uno strumento</a> in Amministrazione.</p>
+		<p class="muted">Prima <a class="link" href="/admin/investimenti">aggiungi uno strumento</a> in Admin.</p>
 	{:else}
 		<form method="POST" action="?/create" use:enhance class="tx-form">
 			<label class="field">
@@ -98,7 +123,7 @@
 		{#if data.brokers.length === 0}
 			<p class="muted hint">
 				Nessun broker configurato: puoi aggiungerli (con logo) in
-				<a class="link" href="/admin/transazioni">Amministrazione</a>.
+				<a class="link" href="/admin/investimenti">Admin</a>.
 			</p>
 		{/if}
 		{#if form?.error}
@@ -107,15 +132,20 @@
 	{/if}
 </section>
 
-<section class="card">
+<section class="card" id="storico-operazioni">
 	<div class="sec-head">
-		<h2>Storico ({data.transactions.length})</h2>
+		<h2>
+			Storico operazioni
+			({data.opsPagination.pages > 1
+				? `${opsFrom}–${opsFrom + data.operations.length - 1} di ${data.opsPagination.total}`
+				: data.opsPagination.total})
+		</h2>
 		<div class="sec-actions">
-			<span class="muted">Import CSV in <a class="link" href="/admin/transazioni">Amministrazione</a></span>
+			<span class="muted">Import CSV in <a class="link" href="/admin/investimenti">Admin</a></span>
 			<a class="btn ghost" href="/api/transactions/export" download>Esporta CSV</a>
 		</div>
 	</div>
-	{#if data.transactions.length === 0}
+	{#if data.operations.length === 0}
 		<p class="muted">Nessuna operazione registrata.</p>
 	{:else}
 		<form
@@ -128,6 +158,7 @@
 					if (result.type === 'success') editingId = null;
 				}}
 		></form>
+		<Pager page={data.opsPagination.page} pages={data.opsPagination.pages} onpage={goPage} label="Pagine dello storico operazioni" />
 		<div class="scroll-x">
 			<table class="data">
 				<thead>
@@ -145,7 +176,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each data.transactions as tx (tx.id)}
+					{#each data.operations as tx (tx.id)}
 						{#if editingId === tx.id}
 							<tr class="editing">
 								<td><input form="edit-tx" type="date" name="date" value={tx.date} max={today} required /></td>
@@ -209,7 +240,7 @@
 								<td class="num">{fmtCurrency(tx.quantity * tx.price + (tx.type === 'buy' ? tx.fee : -tx.fee), tx.currency)}</td>
 								<td class="notes-cell">{tx.notes ?? ''}</td>
 								<td class="row-actions">
-									<button class="act" type="button" title="Modifica" aria-label="Modifica transazione" onclick={() => (editingId = tx.id)}>✎</button>
+									<button class="act" type="button" title="Modifica" aria-label="Modifica operazione" onclick={() => (editingId = tx.id)}>✎</button>
 									<form
 										method="POST"
 										action="?/duplicate"
@@ -222,7 +253,7 @@
 											}}
 									>
 										<input type="hidden" name="id" value={tx.id} />
-										<button class="act" type="submit" title="Duplica (poi modifica)" aria-label="Duplica transazione">⧉</button>
+										<button class="act" type="submit" title="Duplica (poi modifica)" aria-label="Duplica operazione">⧉</button>
 									</form>
 									<form
 										method="POST"
@@ -230,11 +261,11 @@
 										use:enhance
 										class="inline"
 										onsubmit={(e) => {
-											if (!confirm('Eliminare questa transazione?')) e.preventDefault();
+											if (!confirm('Eliminare questa operazione?')) e.preventDefault();
 										}}
 									>
 										<input type="hidden" name="id" value={tx.id} />
-										<button class="act del" type="submit" title="Elimina" aria-label="Elimina transazione">✕</button>
+										<button class="act del" type="submit" title="Elimina" aria-label="Elimina operazione">✕</button>
 									</form>
 								</td>
 							</tr>
@@ -243,6 +274,7 @@
 				</tbody>
 			</table>
 		</div>
+		<Pager page={data.opsPagination.page} pages={data.opsPagination.pages} onpage={goPage} label="Pagine dello storico operazioni" />
 		{#if editingId !== null && form?.error}
 			<p class="error">{form.error}</p>
 		{/if}
@@ -250,10 +282,6 @@
 </section>
 
 <style>
-	.page-title {
-		font-size: 1.7rem;
-		margin-bottom: 1.2rem;
-	}
 	section.card {
 		margin-bottom: 1rem;
 	}
@@ -309,10 +337,10 @@
 		margin-right: 0.45rem;
 	}
 	.type-ico.etf {
-		color: #86b6ef;
+		color: var(--accent-ink);
 	}
 	.type-ico.crypto {
-		color: #b7aef0;
+		color: var(--crypto-ink);
 	}
 	.broker {
 		display: inline-flex;
@@ -344,11 +372,11 @@
 		border-radius: 999px;
 	}
 	.side.buy {
-		color: #7fd67f;
+		color: var(--good-ink);
 		background: rgba(12, 163, 12, 0.13);
 	}
 	.side.sell {
-		color: #f0a3a3;
+		color: var(--bad-ink);
 		background: rgba(230, 103, 103, 0.13);
 	}
 	.notes-cell {
@@ -374,14 +402,14 @@
 	}
 	.act:hover {
 		color: var(--ink);
-		background: rgba(255, 255, 255, 0.08);
+		background: var(--hover-strong);
 	}
 	.act.del:hover {
 		color: var(--bad);
 		background: rgba(230, 103, 103, 0.12);
 	}
 	.ok-act:hover {
-		color: #7fd67f;
+		color: var(--good-ink);
 		background: rgba(12, 163, 12, 0.13);
 	}
 	tr.editing input,

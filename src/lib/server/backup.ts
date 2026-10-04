@@ -130,7 +130,9 @@ const TABLES = [
 	'cards',
 	'expenses',
 	'expense_categories',
-	'expense_keywords'
+	'expense_keywords',
+	'budgets',
+	'import_profiles'
 ];
 
 /** Ripristina un backup nel DB vivo: svuota le tabelle e copia le righe dal file,

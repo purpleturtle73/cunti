@@ -7,8 +7,9 @@ const config = {
 	kit: {
 		adapter: adapter(),
 		// app senza autenticazione su rete locale/VPN, raggiunta via IP o hostname
-		// diversi: il check dell'header Origin richiederebbe un ORIGIN fisso
-		csrf: { checkOrigin: false }
+		// diversi: il check dell'header Origin richiederebbe un ORIGIN fisso.
+		// ['*'] è il sostituto di `checkOrigin: false` (deprecato da SvelteKit 2.x)
+		csrf: { trustedOrigins: ['*'] }
 	}
 };
 

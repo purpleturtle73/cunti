@@ -5,8 +5,9 @@
 	import LotsTable from '$lib/components/LotsTable.svelte';
 	import StatTile from '$lib/components/StatTile.svelte';
 	import { fmtCurrency, fmtDate, fmtEur, fmtPct, signClass } from '$lib/format';
+	import Operazioni from './Operazioni.svelte';
 
-	let { data } = $props();
+	let { data, form } = $props();
 	let snap = $derived(data.snapshot);
 	let tax = $derived(data.tax);
 
@@ -88,38 +89,24 @@
 	let latentTax = $derived(tax.latentEtfTax + tax.latentCryptoTax);
 </script>
 
-<svelte:head><title>Cunti — Dashboard</title></svelte:head>
+<svelte:head><title>Cunti — Investimenti</title></svelte:head>
 
-{#snippet speseRow()}
-	{#if data.spese}
-		<section class="spese-row">
-			<h2 class="row-title"><a href="/spese">Spese →</a></h2>
-			<div class="tiles-inner">
-				<StatTile label="Uscite del mese" value={fmtEur(data.spese.monthOut)} tone={data.spese.monthOut > 0 ? 'neg' : 'neutral'} />
-				<StatTile label="Entrate del mese" value={fmtEur(data.spese.monthIn)} tone={data.spese.monthIn > 0 ? 'pos' : 'neutral'} />
-				<StatTile label="Saldo {data.spese.curYear}" value={fmtEur(data.spese.ytdNet)} tone={data.spese.ytdNet >= 0 ? 'pos' : 'neg'} sub="entrate − uscite, giroconti esclusi" />
-				{#if data.spese.topCat}
-					<StatTile label="Top categoria del mese" value={data.spese.topCat} />
-				{/if}
-			</div>
-		</section>
-	{/if}
-{/snippet}
+<h1 class="page-title">Investimenti</h1>
 
 {#if snap.positions.length === 0}
 	<section class="onboarding card">
-		<h1>Benvenuto in Cunti</h1>
+		<h2 class="onboarding-title">Nessun investimento registrato</h2>
 		<p>
-			Per iniziare: <a href="/admin/transazioni">aggiungi gli strumenti</a> (ETF di Borsa Italiana o crypto),
-			poi <a href="/transactions">registra i tuoi acquisti</a>. I prezzi si aggiornano da soli ogni 6 ore.
+			Per iniziare: <a href="/admin/investimenti">aggiungi gli strumenti</a> (ETF di Borsa Italiana o crypto),
+			poi <a href="#nuova-operazione">registra i tuoi acquisti</a> qui sotto. I prezzi si aggiornano da soli ogni
+			6 ore. Per provare l'app senza dati tuoi: <a href="/admin/investimenti#demo">crea i dati demo</a>.
 		</p>
 	</section>
-	{@render speseRow()}
 {:else}
 	<header class="hero">
 		<div>
 			<span class="hero-label">Valore del portafoglio</span>
-			<h1 class="hero-value tabular">{fmtEur(snap.totalValue)}</h1>
+			<p class="hero-value tabular">{fmtEur(snap.totalValue)}</p>
 			<div class="hero-delta">
 				<span class={['tabular', signClass(snap.grossProfit)]}>
 					{fmtEur(snap.grossProfit)} ({fmtPct(snap.totalInvested > 0 ? snap.grossProfit / snap.totalInvested : null)})
@@ -207,8 +194,6 @@
 		/>
 	</section>
 
-	{@render speseRow()}
-
 	<section class="grid-2">
 		<div class="card">
 			<h2>Allocazione</h2>
@@ -264,9 +249,11 @@
 									<th>Anno</th>
 									<th class="num">Plusv. ETF</th>
 									<th class="num">Minusv. ETF</th>
-									<th class="num">Imposta trattenuta (banca)</th>
-									<th class="num">Plusv. crypto</th>
-									<th class="num">Imposta crypto da dichiarare</th>
+									<th class="num" title="Imposta trattenuta dalla banca sulle plusvalenze ETF">Imposta banca</th>
+									<th class="num" title="Plusvalenze meno minusvalenze crypto dell'anno">Crypto netto</th>
+									<th class="num" title="Minusvalenze crypto di anni precedenti usate nell'anno">Zainetto</th>
+									<th class="num" title="Imponibile crypto dopo la compensazione">Imponibile</th>
+									<th class="num" title="Imposta crypto da versare in dichiarazione">Imposta crypto</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -276,7 +263,9 @@
 										<td class="num">{fmtEur(y.etfGains)}</td>
 										<td class="num">{y.etfLosses > 0 ? fmtEur(-y.etfLosses) : '—'}</td>
 										<td class="num">{fmtEur(y.etfTaxWithheld)}</td>
-										<td class="num">{fmtEur(y.cryptoGains)}</td>
+										<td class={['num', signClass(y.cryptoGains)]}>{fmtEur(y.cryptoGains)}</td>
+										<td class="num">{y.cryptoLossUsed > 0 ? fmtEur(-y.cryptoLossUsed) : '—'}</td>
+										<td class="num">{fmtEur(y.cryptoTaxable)}</td>
 										<td class="num">{fmtEur(y.cryptoTaxDue)}</td>
 									</tr>
 								{/each}
@@ -284,10 +273,72 @@
 						</table>
 					</div>
 				{/if}
+			</div>
+
+			<div class="fisco-block wide">
+				<h3>Zainetto fiscale <span class="muted">— minusvalenze da recuperare</span></h3>
+				{#if tax.lossPots.length === 0}
+					<p class="muted">Nessuna minusvalenza realizzata: lo zainetto è vuoto.</p>
+				{:else}
+					{#each tax.lossPots as pot (pot.key)}
+						<div class="pot">
+							<div class="pot-head">
+								<strong>{pot.label}</strong>
+								<span class="tabular">
+									disponibile <strong>{fmtEur(pot.available)}</strong>
+									{#if pot.expiringThisYear > 0}
+										· <span class="neg">{fmtEur(pot.expiringThisYear)} in scadenza il 31/12</span>
+									{/if}
+								</span>
+							</div>
+							<div class="scroll-x">
+								<table class="data compact">
+									<thead>
+										<tr>
+											<th>Realizzata nel</th>
+											<th class="num">Minusvalenza</th>
+											<th class="num">Usata</th>
+											<th class="num">Scaduta</th>
+											<th class="num">Residua</th>
+											<th>Utilizzabile fino al</th>
+											<th>Usata negli anni</th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each pot.entries as e (e.year)}
+											<tr class={{ dim: e.remaining === 0 }}>
+												<td>{e.year}</td>
+												<td class="num">{fmtEur(e.amount)}</td>
+												<td class="num">{e.used > 0 ? fmtEur(e.used) : '—'}</td>
+												<td class={['num', { neg: e.expired > 0 }]}>{e.expired > 0 ? fmtEur(e.expired) : '—'}</td>
+												<td class="num"><strong>{fmtEur(e.remaining)}</strong></td>
+												<td>31/12/{e.expiresYear}</td>
+												<td class="muted">{e.uses.map((u) => `${u.year}: ${fmtEur(u.amount)}`).join(' · ') || '—'}</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+							{#if pot.regime === 'amministrato'}
+								<p class="note">
+									Lo tiene la banca per questo dossier. Le minus ETF compensano solo redditi diversi realizzati nello
+									stesso dossier (azioni, ETC, obbligazioni, certificati), <strong>non</strong> le plusvalenze da ETF,
+									che sono redditi di capitale: l'app non traccia quegli strumenti, quindi qui il residuo non scende.
+								</p>
+							{:else}
+								<p class="note">
+									Le minus crypto compensano le plusvalenze crypto degli anni successivi (dalla più vecchia): le imposte
+									della tabella sopra ne tengono già conto. In dichiarazione vanno riportate nel quadro RT.
+								</p>
+							{/if}
+						</div>
+					{/each}
+				{/if}
 				<p class="note">
-					Stime indicative, non consulenza fiscale. ETF in regime amministrato: la banca trattiene il 26%
-					alla vendita (le minusvalenze ETF non compensano plusvalenze ETF). Crypto su exchange estero:
-					regime dichiarativo, 26% fino al 2025 e 33% dal 2026, quadri RT/RW.
+					Stime indicative, non consulenza fiscale. ETF in regime amministrato: la banca trattiene il 26% alla vendita.
+					Crypto su exchange estero: regime dichiarativo, 26% fino al 2025 e 33% dal 2026, quadri RT/RW. Le minusvalenze
+					si usano nell'anno di realizzo e nei quattro successivi (art. 68 TUIR); zainetti di regimi diversi non si
+					sommano (dall'amministrato al dichiarativo servono la chiusura del dossier e la certificazione della banca).
 				</p>
 			</div>
 		</div>
@@ -338,11 +389,23 @@
 	</section>
 {/if}
 
+<Operazioni {data} {form} />
+
 <style>
+	.page-title {
+		font-size: 1.7rem;
+		margin-bottom: 1.2rem;
+	}
 	.onboarding {
-		margin-top: 3rem;
 		text-align: center;
-		padding: 3rem;
+		padding: 2.4rem;
+		margin-bottom: 1rem;
+	}
+	.onboarding .onboarding-title {
+		font-size: 1.3rem;
+		text-transform: none;
+		letter-spacing: -0.02em;
+		color: var(--ink);
 	}
 	.onboarding p {
 		color: var(--ink-2);
@@ -369,11 +432,13 @@
 		color: var(--ink-3);
 	}
 	.hero-value {
+		margin: 0;
+		font-family: var(--font-display);
 		font-size: clamp(2.4rem, 5vw, 3.6rem);
 		font-weight: 700;
 		letter-spacing: -0.03em;
 		line-height: 1.05;
-		background: linear-gradient(120deg, #fff 30%, #b9c8ff);
+		background: linear-gradient(120deg, var(--hero-from) 30%, var(--hero-to));
 		-webkit-background-clip: text;
 		background-clip: text;
 		color: transparent;
@@ -412,7 +477,7 @@
 	}
 	.pill.active {
 		border-color: var(--accent);
-		background: linear-gradient(120deg, rgba(57, 135, 229, 0.16), rgba(144, 133, 233, 0.12));
+		background: var(--selected);
 		color: var(--ink);
 	}
 	.pill-label {
@@ -467,7 +532,7 @@
 		color: var(--ink);
 	}
 	.seg-btn.active {
-		background: linear-gradient(120deg, rgba(57, 135, 229, 0.18), rgba(144, 133, 233, 0.14));
+		background: var(--selected);
 		color: var(--ink);
 	}
 	.chart-abs {
@@ -506,27 +571,6 @@
 	}
 	@media (max-width: 1100px) {
 		.tiles {
-			grid-template-columns: repeat(2, 1fr);
-		}
-	}
-
-	.spese-row {
-		margin-bottom: 1rem;
-	}
-	.row-title {
-		font-size: 0.95rem;
-		margin: 0 0 0.6rem;
-	}
-	.row-title a:hover {
-		color: var(--accent);
-	}
-	.tiles-inner {
-		display: grid;
-		grid-template-columns: repeat(4, 1fr);
-		gap: 0.8rem;
-	}
-	@media (max-width: 1100px) {
-		.tiles-inner {
 			grid-template-columns: repeat(2, 1fr);
 		}
 	}
@@ -624,6 +668,26 @@
 		font-size: 0.75rem;
 		color: var(--ink-3);
 		max-width: 70rem;
+	}
+	.fisco h3 .muted {
+		font-weight: 400;
+	}
+	.pot + .pot {
+		margin-top: 1.2rem;
+	}
+	.pot-head {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
+		font-size: 0.88rem;
+		margin-bottom: 0.3rem;
+	}
+	.pot .note {
+		margin-top: 0.4rem;
+	}
+	tr.dim td {
+		color: var(--ink-3);
 	}
 	@media (max-width: 900px) {
 		.fisco {

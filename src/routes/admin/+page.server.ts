@@ -11,7 +11,7 @@ import { logError } from '$lib/server/log';
 import { UPLOAD_MAX_BYTES } from '$lib/server/uploads';
 import type { Actions, PageServerLoad } from './$types';
 
-/** Amministrazione → Generale: ciò che riguarda tutta l'app (backup e ripristino). */
+/** Admin → Generale: ciò che riguarda tutta l'app (backup e ripristino). */
 export const load: PageServerLoad = () => ({
 	backups: listBackups(),
 	lastBackup: getSetting('last_backup')

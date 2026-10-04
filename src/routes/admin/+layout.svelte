@@ -4,20 +4,20 @@
 
 	let { data, children } = $props();
 
-	// Generale = ciò che vale per tutta l'app; poi un'area per dominio.
-	// Categorie e Conflitti sono sottopagine delle Spese ma stanno in prima fila:
+	// Generale = ciò che vale per tutta l'app; poi un'area per dominio, nell'ordine del
+	// menu. Categorie e Conflitti sono sottopagine di Finanze ma stanno in prima fila:
 	// sono gli strumenti che si usano più spesso dopo un import.
 	const tabs = [
 		{ href: '/admin', label: 'Generale' },
-		{ href: '/admin/transazioni', label: 'Transazioni' },
-		{ href: '/admin/spese', label: 'Spese' },
-		{ href: '/admin/spese/categorie', label: 'Categorie', child: true },
-		{ href: '/admin/spese/conflitti', label: 'Conflitti', child: true }
+		{ href: '/admin/finanze', label: 'Finanze' },
+		{ href: '/admin/finanze/categorie', label: 'Categorie', child: true },
+		{ href: '/admin/finanze/conflitti', label: 'Conflitti', child: true },
+		{ href: '/admin/investimenti', label: 'Investimenti' }
 	];
 </script>
 
 <div class="admin-area">
-	<h1 class="page-title">Amministrazione</h1>
+	<h1 class="page-title">Admin</h1>
 	<p class="app-version">
 		Versione immagine <code title="Release dell'immagine container in esecuzione">{data.version}</code>
 		{#if data.version === 'dev'}<span class="muted">(esecuzione fuori da un'immagine)</span>{/if}

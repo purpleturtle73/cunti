@@ -23,12 +23,12 @@
 	let lastBackupLabel = $derived(data.lastBackup ? fmtWhen(data.lastBackup) : 'mai');
 </script>
 
-<svelte:head><title>Cunti — Amministrazione</title></svelte:head>
+<svelte:head><title>Cunti — Admin</title></svelte:head>
 
 <p class="muted area-intro">
 	Impostazioni comuni a tutta l'app. Strumenti, broker e import delle operazioni stanno in
-	<a class="link" href="/admin/transazioni">Transazioni</a>; card, import, categorie e conflitti
-	delle spese in <a class="link" href="/admin/spese">Spese</a>.
+	<a class="link" href="/admin/investimenti">Investimenti</a>; card, import, categorie e conflitti
+	dei movimenti in <a class="link" href="/admin/finanze">Finanze</a>.
 </p>
 
 <section class="card">

@@ -192,7 +192,7 @@ export function parseTransactionsCsv(
 		if (isin !== '') {
 			const matches = byIsin.get(isin);
 			if (!matches) {
-				errors.push(`Riga ${lineNo}: ISIN "${isin}" non trovato (censiscilo sullo strumento in Amministrazione).`);
+				errors.push(`Riga ${lineNo}: ISIN "${isin}" non trovato (censiscilo sullo strumento in Admin).`);
 				continue;
 			}
 			if (matches.length > 1) {
@@ -243,7 +243,7 @@ export function parseTransactionsCsv(
 		if (brokerRaw !== '') {
 			broker_id = byBroker.get(brokerRaw.toLowerCase()) ?? null;
 			if (!broker_id) {
-				errors.push(`Riga ${lineNo}: broker "${brokerRaw}" non trovato (crealo prima in Amministrazione).`);
+				errors.push(`Riga ${lineNo}: broker "${brokerRaw}" non trovato (crealo prima in Admin).`);
 				continue;
 			}
 		}

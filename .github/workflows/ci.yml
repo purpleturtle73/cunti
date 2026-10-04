@@ -90,15 +90,94 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # Eseguibile Windows (Node.js Single Executable Application): sempre costruito e
+  # provato; scaricabile dagli artifact del run, allegato alla release solo sui tag.
+  windows-exe:
+    name: Windows exe
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # node.exe di setup-node diventa l'eseguibile: better-sqlite3 installato da npm ci
+      # è compilato per la stessa versione
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compute app version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build app and exe
+        env:
+          APP_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          npm run build
+          npm run build:exe
+
+      # avvio reale da una cartella diversa da quella dell'exe: il server deve rispondere
+      # e il database deve nascere accanto all'exe
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $dir = New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\cunti-smoke"
+          Copy-Item dist\cunti.exe $dir
+          $env:PORT = '3099'
+          $env:CUNTI_NO_BROWSER = '1'
+          $p = Start-Process -FilePath "$dir\cunti.exe" -WorkingDirectory $env:RUNNER_TEMP -PassThru `
+            -RedirectStandardOutput "$dir\out.log" -RedirectStandardError "$dir\err.log"
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            Start-Sleep -Seconds 1
+            try {
+              $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3099/api/health
+              if ($r.StatusCode -eq 200) { $ok = $true; break }
+            } catch {}
+          }
+          if ($ok) { $page = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3099/finanze }
+          Stop-Process -Id $p.Id -Force
+          Get-Content "$dir\out.log", "$dir\err.log" -ErrorAction SilentlyContinue
+          if (-not $ok) { throw 'health check fallito' }
+          if ($page.StatusCode -ne 200) { throw "/finanze ha risposto $($page.StatusCode)" }
+          if (-not (Test-Path "$dir\cunti.db")) { throw 'cunti.db non creato accanto all''exe' }
+
+      - name: Name exe
+        shell: bash
+        run: mv dist/cunti.exe "dist/cunti-${{ steps.version.outputs.value }}-windows-x64.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cunti-windows-x64
+          path: dist/cunti-*-windows-x64.exe
+          retention-days: 14
+
   release:
     name: GitHub Release
-    needs: test
+    needs: [test, windows-exe]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cunti-windows-x64
+          path: dist
+
       - uses: softprops/action-gh-release@v1
         with:
           generate_release_notes: true
+          files: dist/*.exe

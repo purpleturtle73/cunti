@@ -113,6 +113,94 @@ describe('buildTaxSummary', () => {
 		expect(y.etfTaxWithheld).toBeCloseTo(130); // 26% dei 500, la minus NON riduce
 	});
 
+	it('crypto: lo zainetto compensa gli anni successivi, dalla minus più vecchia', () => {
+		const crypto = makePosition('crypto', {
+			realizedEvents: [
+				{ date: '2022-05-01', gain: -300, proceeds: 100 },
+				{ date: '2023-05-01', gain: -1000, proceeds: 500 },
+				{ date: '2024-05-01', gain: 600, proceeds: 2000 },
+				{ date: '2025-05-01', gain: 1000, proceeds: 3000 }
+			]
+		});
+		const t = buildTaxSummary([crypto], new Map(), 2026);
+		const y = (n: number) => t.realizedByYear.find((r) => r.year === n)!;
+		// 2024: 600 di gain, consumano 300 (2022) + 300 (2023)
+		expect(y(2024)).toMatchObject({ cryptoLossUsed: 600, cryptoTaxable: 0, cryptoTaxDue: 0 });
+		// 2025: restano 700 della minus 2023 → imponibile 300, al 26%
+		expect(y(2025).cryptoLossUsed).toBeCloseTo(700);
+		expect(y(2025).cryptoTaxable).toBeCloseTo(300);
+		expect(y(2025).cryptoTaxDue).toBeCloseTo(78);
+
+		const pot = t.lossPots.find((p) => p.key === 'crypto')!;
+		expect(pot.regime).toBe('dichiarativo');
+		expect(pot.entries.map((e) => [e.year, e.amount, e.remaining, e.expiresYear])).toEqual([
+			[2022, 300, 0, 2026],
+			[2023, 1000, 0, 2027]
+		]);
+		expect(pot.entries[1].uses).toEqual([
+			{ year: 2024, amount: 300 },
+			{ year: 2025, amount: 700 }
+		]);
+		expect(pot.available).toBe(0);
+	});
+
+	it('crypto: una minus non usata entro il quarto anno successivo scade', () => {
+		const crypto = makePosition('crypto', {
+			realizedEvents: [
+				{ date: '2020-03-01', gain: -500, proceeds: 100 },
+				{ date: '2025-03-01', gain: 800, proceeds: 2000 } // 2025 > 2020 + 4
+			]
+		});
+		const t = buildTaxSummary([crypto], new Map(), 2026);
+		const y2025 = t.realizedByYear.find((r) => r.year === 2025)!;
+		expect(y2025.cryptoLossUsed).toBe(0);
+		expect(y2025.cryptoTaxDue).toBeCloseTo(208); // 26% di 800, nessuno sconto
+		const e = t.lossPots[0].entries[0];
+		expect(e).toMatchObject({ expiresYear: 2024, expired: 500, remaining: 0 });
+	});
+
+	it('crypto: disponibile e in scadenza nell\'anno in corso', () => {
+		const crypto = makePosition('crypto', {
+			realizedEvents: [
+				{ date: '2022-03-01', gain: -200, proceeds: 100 }, // scade a fine 2026
+				{ date: '2025-03-01', gain: -400, proceeds: 100 }
+			]
+		});
+		const pot = buildTaxSummary([crypto], new Map(), 2026).lossPots[0];
+		expect(pot.available).toBe(600);
+		expect(pot.expiringThisYear).toBe(200);
+	});
+
+	it('crypto latente: le perdite latenti e lo zainetto abbattono il "vendi tutto oggi"', () => {
+		const realized = makePosition('crypto', {
+			realizedEvents: [{ date: '2025-03-01', gain: -1000, proceeds: 100 }]
+		});
+		const winner = makePosition('crypto', { value: 5000, unrealized: 1500 });
+		const loser = makePosition('crypto', { value: 1000, unrealized: -200 });
+		const t = buildTaxSummary([realized, winner, loser], new Map(), 2026);
+		// 1500 - 200 = 1300 latenti, meno 1000 di zainetto = 300 al 33%
+		expect(t.latentCryptoTax).toBeCloseTo(99);
+		// senza zainetto né perdite: 1500 al 33%
+		expect(buildTaxSummary([winner], new Map(), 2026).latentCryptoTax).toBeCloseTo(495);
+	});
+
+	it('ETF: minus in zainetti separati per broker (amministrato), mai consumate dai gain ETF', () => {
+		const etf = makePosition('etf', {
+			realizedEvents: [
+				{ date: '2024-02-01', gain: -300, proceeds: 1000, brokerId: 1 },
+				{ date: '2025-02-01', gain: 900, proceeds: 3000, brokerId: 1 },
+				{ date: '2025-06-01', gain: -100, proceeds: 500, brokerId: 2 }
+			]
+		});
+		const t = buildTaxSummary([etf], new Map([[1, 'Banca A'], [2, 'Banca B']]), 2026);
+		const pots = t.lossPots.filter((p) => p.regime === 'amministrato');
+		expect(pots.map((p) => [p.label, p.available])).toEqual([
+			['ETF — Banca A (regime amministrato)', 300],
+			['ETF — Banca B (regime amministrato)', 100]
+		]);
+		expect(t.realizedByYear.find((r) => r.year === 2025)!.etfTaxWithheld).toBeCloseTo(234); // 26% di 900 pieno
+	});
+
 	it('netProfit = lordo - imposte realizzate - imposte latenti', () => {
 		const etf = makePosition('etf', {
 			value: 11000,

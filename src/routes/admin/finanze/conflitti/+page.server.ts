@@ -5,7 +5,7 @@ import type { Actions, PageServerLoad } from './$types';
 /** Quante voci mostrare per gruppo: i gruppi grandi si risolvono in blocco. */
 const ITEMS_PER_GROUP = 50;
 
-/** Amministrazione → Spese → Conflitti: voci la cui categoria non coincide con quella
+/** Admin → Finanze → Conflitti: voci la cui categoria non coincide con quella
  *  che assegnerebbero le regole attuali. */
 export const load: PageServerLoad = ({ url }) => {
 	const locked = url.searchParams.get('vista') === 'bloccate';

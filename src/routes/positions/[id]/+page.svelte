@@ -14,7 +14,7 @@
 
 <header class="head">
 	<div>
-		<a class="back" href="/">← Dashboard</a>
+		<a class="back" href="/investimenti">← Investimenti</a>
 		<h1>
 			{inst.name}
 			<span class="ticker">{inst.symbol}</span>
@@ -175,11 +175,11 @@
 		border-radius: 999px;
 	}
 	.side.buy {
-		color: #7fd67f;
+		color: var(--good-ink);
 		background: rgba(12, 163, 12, 0.13);
 	}
 	.side.sell {
-		color: #f0a3a3;
+		color: var(--bad-ink);
 		background: rgba(230, 103, 103, 0.13);
 	}
 	.notes-cell {

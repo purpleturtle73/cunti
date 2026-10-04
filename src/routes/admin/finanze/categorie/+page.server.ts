@@ -21,7 +21,7 @@ import { STARTER_CATEGORIES } from '$lib/server/starter-categories';
 import { CATEGORIES_JSON_MAX_BYTES } from '$lib/server/uploads';
 import type { Actions, PageServerLoad } from './$types';
 
-/** Amministrazione → Spese → Categorie: categorie, keyword, import/export JSON,
+/** Admin → Finanze → Categorie: categorie, keyword, import/export JSON,
  *  ricategorizzazione delle voci senza categoria. */
 export const load: PageServerLoad = () => {
 	const defs = listCategoryDefs();
@@ -73,7 +73,7 @@ export const actions: Actions = {
 		const res = renameCategory(oldName, newName);
 		if (!res.ok) return ko(res.error, oldName);
 		return ok(
-			`"${oldName}" → "${newName.trim()}"${res.merged ? ' (unite)' : ''}: ${res.expenses} spese, ${res.keywordsMoved} keyword.`,
+			`"${oldName}" → "${newName.trim()}"${res.merged ? ' (unite)' : ''}: ${res.expenses} movimenti, ${res.keywordsMoved} keyword.`,
 			newName.trim()
 		);
 	},
@@ -83,7 +83,7 @@ export const actions: Actions = {
 		const name = String(f.get('name') || '');
 		const res = deleteCategory(name);
 		return res.ok
-			? ok(`Categoria "${name}" eliminata: ${res.expenses} spese tornate senza categoria.`)
+			? ok(`Categoria "${name}" eliminata: ${res.expenses} movimenti tornati senza categoria.`)
 			: ko(res.error, name);
 	},
 

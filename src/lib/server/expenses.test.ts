@@ -17,8 +17,12 @@ const {
 	categoryTrend,
 	conflictKey,
 	coverage,
+	balanceSeries,
 	exportExpensesCsv,
+	filterConditions,
+	filteredInOut,
 	monthsInPeriod,
+	NO_FILTERS,
 	recurring,
 	renameCard,
 	stageImport,
@@ -357,5 +361,114 @@ describe('recurring — riconoscimento euristico delle uscite ricorrenti', () =>
 		const rec = recurring(new Set());
 		expect(rec).toHaveLength(1);
 		expect(rec[0].active).toBe(false);
+	});
+});
+
+describe('filtri della pagina Spese e ricorrenti filtrate', () => {
+	function seedFiltered() {
+		db.prepare('DELETE FROM expenses').run();
+		db.prepare('DELETE FROM cards').run();
+		const i = db.prepare('INSERT INTO expenses (date, description, card, amount, category) VALUES (?, ?, ?, ?, ?)');
+		// abbonamento a cavallo d'anno: 3 mesi nel 2025, 2 nel 2026
+		for (const d of ['2025-10', '2025-11', '2025-12', '2026-01', '2026-02'])
+			i.run(`${d}-05`, 'Addebito Streaming Video', 'MASTERCARD - 1234', -9.99, 'svago');
+		// rata finita nel 2025
+		for (const m of ['01', '02', '03', '04']) i.run(`2025-${m}-15`, 'Rata Finanziamento Divano', 'conto', -80, 'casa');
+		// versamento mensile su un giroconto
+		for (const m of ['01', '02', '03', '04']) i.run(`2026-${m}-27`, 'GIROCONTO Verso Deposito', 'conto', -500, 'investimenti');
+		// spesa non ricorrente nel 2026
+		i.run('2026-01-20', 'Ferramenta', 'conto', -40, 'casa');
+	}
+	const T = new Set(['investimenti']);
+	const f = (patch: Partial<typeof NO_FILTERS>) => ({ ...NO_FILTERS, ...patch });
+
+	it('senza periodo mostra tutte le ricorrenti, con il totale sullo storico', () => {
+		seedFiltered();
+		const rec = recurring(T);
+		expect(rec.map((r) => r.label).sort()).toEqual(['Addebito Streaming Video', 'Rata Finanziamento Divano']);
+		const s = rec.find((r) => r.label === 'Addebito Streaming Video')!;
+		expect(s.periodCount).toBe(5);
+		expect(s.periodTotal).toBeCloseTo(9.99 * 5);
+	});
+
+	it("l'anno sceglie le ricorrenti addebitate nel periodo, riconosciute su tutto lo storico", () => {
+		seedFiltered();
+		const rec = recurring(T, f({ year: '2026' }));
+		// la rata è finita nel 2025; lo streaming nel 2026 ha solo 2 mesi ma è ricorrente sullo storico
+		expect(rec.map((r) => r.label)).toEqual(['Addebito Streaming Video']);
+		expect(rec[0].months).toBe(5);
+		expect(rec[0].periodCount).toBe(2);
+		expect(rec[0].periodTotal).toBeCloseTo(19.98);
+	});
+
+	it('il mese restringe ulteriormente il periodo', () => {
+		seedFiltered();
+		expect(recurring(T, f({ year: '2025', month: '03' })).map((r) => r.label)).toEqual(['Rata Finanziamento Divano']);
+		expect(recurring(T, f({ year: '2026', month: '03' }))).toEqual([]);
+	});
+
+	it('categoria e categorie escluse restringono le uscite analizzate', () => {
+		seedFiltered();
+		expect(recurring(T, f({ category: 'casa' })).map((r) => r.label)).toEqual(['Rata Finanziamento Divano']);
+		expect(recurring(T, f({ exCategories: ['svago'] })).map((r) => r.label)).toEqual(['Rata Finanziamento Divano']);
+	});
+
+	it('una categoria giroconto scelta esplicitamente viene analizzata', () => {
+		seedFiltered();
+		expect(recurring(T).map((r) => r.label)).not.toContain('GIROCONTO Verso Deposito');
+		const rec = recurring(T, f({ category: 'investimenti' }));
+		expect(rec.map((r) => r.label)).toEqual(['GIROCONTO Verso Deposito']);
+	});
+
+	it('escludere una card configurata esclude i valori grezzi che raggruppa', () => {
+		seedFiltered();
+		db.prepare("INSERT INTO cards (name) VALUES ('Mastercard')").run();
+		const { where, params } = filterConditions(f({ exCards: ['Mastercard'] }));
+		const n = (
+			db.prepare(`SELECT COUNT(*) AS c FROM expenses WHERE ${where.join(' AND ')}`).get(...params) as { c: number }
+		).c;
+		expect(n).toBe(9); // 14 voci meno le 5 su "MASTERCARD - 1234"
+		expect(recurring(T, f({ exCards: ['Mastercard'] })).map((r) => r.label)).toEqual(['Rata Finanziamento Divano']);
+		// anche il valore grezzo funziona
+		expect(recurring(T, f({ exCards: ['MASTERCARD - 1234'] })).map((r) => r.label)).toEqual(['Rata Finanziamento Divano']);
+	});
+
+	it('la ricerca filtra per descrizione', () => {
+		seedFiltered();
+		expect(recurring(T, f({ q: 'streaming' })).map((r) => r.label)).toEqual(['Addebito Streaming Video']);
+	});
+
+	it('balanceSeries: saldo cumulato su giorni consecutivi, giroconti esclusi, filtri applicati', () => {
+		db.prepare('DELETE FROM expenses').run();
+		const i = db.prepare('INSERT INTO expenses (date, description, card, amount, category) VALUES (?, ?, ?, ?, ?)');
+		i.run('2026-02-27', 'Stipendio', 'conto', 1000, 'stipendio');
+		i.run('2026-03-01', 'Spesa', 'conto', -100, 'spesa');
+		i.run('2026-03-01', 'Bar', 'conto', -5.5, 'ristoranti');
+		i.run('2026-03-02', 'Giro', 'conto', -500, 'investimenti');
+		i.run('2026-03-04', 'Spesa', 'conto', -50, 'spesa');
+
+		const s = balanceSeries(T, NO_FILTERS);
+		// 27/2 → 4/3: giorni consecutivi (2026 non è bisestile), anche quelli senza movimenti
+		expect(s.map((p) => p.date)).toEqual(['2026-02-27', '2026-02-28', '2026-03-01', '2026-03-02', '2026-03-03', '2026-03-04']);
+		expect(s.map((p) => p.value)).toEqual([1000, 1000, 894.5, 894.5, 894.5, 844.5]);
+
+		// categoria scelta: solo quella, giroconto compreso se è lei
+		expect(balanceSeries(T, f({ category: 'spesa' })).at(-1)!.value).toBe(-150);
+		expect(balanceSeries(T, f({ category: 'investimenti' })).map((p) => p.value)).toEqual([-500]);
+		// il periodo dei filtri non taglia la serie (lo sceglie il grafico)
+		expect(balanceSeries(T, f({ year: '2026', month: '03' }))[0].date).toBe('2026-02-27');
+		expect(balanceSeries(T, f({ q: 'nessuna' }))).toEqual([]);
+	});
+
+	it('filteredInOut somma entrate e uscite del periodo esclusi i giroconti, salvo categoria esplicita', () => {
+		seedFiltered();
+		db.prepare("INSERT INTO expenses (date, description, card, amount, category) VALUES ('2026-02-27', 'Stipendio', 'conto', 1800, 'stipendio')").run();
+		db.prepare("INSERT INTO expenses (date, description, card, amount, category) VALUES ('2026-03-01', 'Rientro Deposito', 'conto', 300, 'investimenti')").run();
+		expect(filteredInOut(T, f({ year: '2026' }))).toEqual({ moneyIn: 1800, moneyOut: expect.closeTo(19.98 + 40) });
+		expect(filteredInOut(T, f({ year: '2026', month: '01' })).moneyOut).toBeCloseTo(9.99 + 40);
+		expect(filteredInOut(T, f({ year: '2026', category: 'investimenti' }))).toEqual({ moneyIn: 300, moneyOut: 2000 });
+		expect(filteredInOut(T, NO_FILTERS).moneyOut).toBeCloseTo(9.99 * 5 + 320 + 40);
+		expect(filteredInOut(T, f({ year: '2026', exCategories: ['stipendio'] })).moneyIn).toBe(0);
+		expect(filteredInOut(T, f({ year: '2030' }))).toEqual({ moneyIn: 0, moneyOut: 0 });
 	});
 });

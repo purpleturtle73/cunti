@@ -213,7 +213,7 @@
 		color: var(--ink);
 	}
 	.seg-btn.active {
-		background: linear-gradient(120deg, rgba(57, 135, 229, 0.18), rgba(144, 133, 233, 0.14));
+		background: var(--selected);
 		color: var(--ink);
 	}
 	.count {

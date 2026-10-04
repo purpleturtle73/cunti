@@ -41,6 +41,7 @@ export interface RealizedEvent {
 	date: string;
 	gain: number; // proceeds (net of fee) - cost basis of sold quantity
 	proceeds: number;
+	brokerId?: number | null; // dossier della vendita: lo zainetto ETF è per intermediario
 }
 
 /** avgCost e lastPrice sono nella valuta dello strumento (per la visualizzazione);
@@ -221,7 +222,7 @@ export function buildPosition(
 		} else {
 			const proceeds = toEur(tx.quantity * tx.price - tx.fee, ccy, tx.date);
 			const gain = proceeds - tx.quantity * avgCostEur;
-			realizedEvents.push({ date: tx.date, gain, proceeds });
+			realizedEvents.push({ date: tx.date, gain, proceeds, brokerId: tx.broker_id ?? null });
 			quantity = Math.max(0, quantity - tx.quantity);
 			divested += proceeds;
 			if (quantity === 0) {

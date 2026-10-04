@@ -42,12 +42,43 @@
 		if (page.url.pathname) drawerOpen = false;
 	});
 
+	// `match`: prefissi che accendono la voce (il dettaglio posizione è parte di Investimenti)
+	// icone: portafoglio (Finanze), grafico in salita (Investimenti), ingranaggio (Admin,
+	// tracciato "settings" di Lucide, lucide.dev, licenza ISC)
 	const nav = [
-		{ href: '/', label: 'Dashboard', icon: 'M4 19 10 12 14 15 20 6M20 6v5M20 6h-5' },
-		{ href: '/transactions', label: 'Transazioni', icon: 'M4 8h13M13 4l4 4-4 4M20 16H7M11 12l-4 4 4 4' },
-		{ href: '/spese', label: 'Spese', icon: 'M3 7h18v13H3zM3 11h18M7 16h4' },
-		{ href: '/admin', label: 'Amministrazione', icon: 'M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1' }
+		{
+			href: '/finanze',
+			label: 'Finanze',
+			icon: 'M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM16 6V4H6a3 3 0 0 0-3 3M21 11h-4a2 2 0 0 0 0 4h4M17 13h.01',
+			match: ['/finanze']
+		},
+		{ href: '/investimenti', label: 'Investimenti', icon: 'M4 19 10 12 14 15 20 6M20 6v5M20 6h-5', match: ['/investimenti', '/positions'] },
+		{
+			href: '/admin',
+			label: 'Admin',
+			icon: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6',
+			match: ['/admin']
+		}
 	];
+	const isActive = (match: string[]) =>
+		match.some((m) => page.url.pathname === m || page.url.pathname.startsWith(m + '/'));
+
+	// Tema: scuro di default. app.html applica la preferenza salvata prima del primo
+	// paint (niente lampo di tema sbagliato); qui la si legge e la si cambia.
+	const THEME_KEY = 'cunti:theme';
+	let theme = $state<'dark' | 'light'>('dark');
+	$effect(() => {
+		theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+	});
+	function toggleTheme() {
+		theme = theme === 'dark' ? 'light' : 'dark';
+		document.documentElement.dataset.theme = theme;
+		try {
+			localStorage.setItem(THEME_KEY, theme);
+		} catch {
+			/* storage non disponibile: il tema vale per questa visita */
+		}
+	}
 
 	let lastRefreshLabel = $derived(
 		data.lastRefresh
@@ -68,7 +99,7 @@
 {/snippet}
 
 {#snippet logo(withName: boolean, gradId: string)}
-	<a class="logo" href="/">
+	<a class="logo" href="/finanze">
 		<svg viewBox="0 0 32 32" width="34" height="34" aria-hidden="true">
 			<defs>
 				<linearGradient id={gradId} x1="0" y1="1" x2="1" y2="0">
@@ -113,7 +144,8 @@
 			{#each nav as item (item.href)}
 				<a
 					href={item.href}
-					class={['nav-item', { active: page.url.pathname === item.href || (item.href !== '/' && page.url.pathname.startsWith(item.href)) }]}
+					class={['nav-item', { active: isActive(item.match) }]}
+					aria-current={isActive(item.match) ? 'page' : undefined}
 					title={collapsed ? item.label : undefined}
 				>
 					<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -125,6 +157,25 @@
 		</nav>
 
 		<div class="side-footer">
+			<button
+				type="button"
+				class="btn ghost theme-toggle"
+				onclick={toggleTheme}
+				aria-pressed={theme === 'light'}
+				aria-label={theme === 'dark' ? 'Passa al tema chiaro' : 'Passa al tema scuro'}
+				title={collapsed ? (theme === 'dark' ? 'Tema chiaro' : 'Tema scuro') : undefined}
+			>
+				<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+					{#if theme === 'dark'}
+						<!-- sole: azione = passare al chiaro -->
+						<circle cx="12" cy="12" r="4" />
+						<path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+					{:else}
+						<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />
+					{/if}
+				</svg>
+				<span class="nav-label">{theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}</span>
+			</button>
 			<button
 				class="btn ghost"
 				onclick={refresh}
@@ -186,7 +237,7 @@
 		gap: 2rem;
 		padding: 1.4rem 1rem;
 		border-right: 1px solid var(--border);
-		background: rgba(13, 13, 13, 0.6);
+		background: var(--sidebar-bg);
 		backdrop-filter: blur(8px);
 		overflow: hidden;
 	}
@@ -229,7 +280,7 @@
 		padding: 0;
 	}
 	.burger:hover {
-		background: rgba(255, 255, 255, 0.06);
+		background: var(--hover);
 		color: var(--ink);
 	}
 	.burger:focus-visible {
@@ -258,11 +309,11 @@
 		flex: none;
 	}
 	.nav-item:hover {
-		background: rgba(255, 255, 255, 0.05);
+		background: var(--hover);
 		color: var(--ink);
 	}
 	.nav-item.active {
-		background: linear-gradient(120deg, rgba(57, 135, 229, 0.18), rgba(144, 133, 233, 0.14));
+		background: var(--selected);
 		color: var(--ink);
 		box-shadow: inset 0 0 0 1px rgba(57, 135, 229, 0.35);
 	}
@@ -344,7 +395,7 @@
 		}
 		.shell.drawer-open aside {
 			transform: none;
-			box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+			box-shadow: 0 0 40px var(--shadow);
 		}
 		/* nel drawer la barra è sempre estesa, anche se ridotta su desktop */
 		.shell.collapsed .nav-label,

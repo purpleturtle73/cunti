@@ -27,7 +27,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.15rem;
-		background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+		background: linear-gradient(180deg, var(--sheen), transparent),
 			var(--surface);
 		border: 1px solid var(--border);
 		border-radius: var(--radius);
@@ -39,9 +39,8 @@
 		text-transform: uppercase;
 		letter-spacing: 0.09em;
 		color: var(--ink-3);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
+		/* niente "…": un'etichetta troppo lunga va a capo invece di perdere il periodo */
+		overflow-wrap: anywhere;
 	}
 	.value {
 		font-family: var(--font-display);

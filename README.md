@@ -1,39 +1,57 @@
 # Cunti
 
-Tracker di portafoglio per investitore italiano: ETF di Borsa Italiana (PAC mensile) + crypto su exchange estero. Self-hosted con Podman, pensato per rete locale/VPN (nessuna autenticazione: **non esporre su internet**).
+Tracker di finanze personali per chi vive in Italia: entrate e uscite dai CSV della banca, più un portafoglio di investimenti (ETF di Borsa Italiana in PAC e crypto su exchange estero). Self-hosted: come container Podman su un server Linux, oppure come eseguibile unico su un PC Windows. I dati restano tuoi, in un file SQLite. Nessuna autenticazione: va usato in rete locale/VPN, **non esporlo su internet**.
 
 ## Funzionalità
 
-- **Transazioni manuali** di acquisto/vendita con commissioni; PMC (prezzo medio di carico) commissioni incluse.
-- **Prezzi automatici**: Yahoo Finance per gli ETF (ticker `.MI`, EUR) e CoinGecko per le crypto (EUR). Aggiornamento all'avvio e ogni 6 ore, più pulsante manuale.
-- **Dashboard**: valore del portafoglio, andamento con selettore periodo (1S / 1M / 3M / 6M / YTD / 1A / MAX, rendimento TWR al netto dei flussi), P&L lordo e **netto stimato dopo le imposte**, rendimento annualizzato, max drawdown, miglior/peggior giorno, commissioni totali, costo TER annuo, allocazione, flussi mensili del PAC.
+### Finanze personali
+
+- **Movimenti** importati dal CSV della banca (anteprima e conferma prima di scrivere, reimport senza doppioni), esportabili per la modifica di massa. Un export in un formato qualsiasi si importa **mappando le colonne** (data, descrizione, importo con segno o Dare/Avere, card, categoria; righe introduttive e totali gestiti), e la mappatura si salva come **profilo** riconosciuto da solo al file successivo.
+- **Categorie e keyword** gestite dalla UI, con un set di partenza in stile app bancaria; **"crea regola da questa voce"** direttamente dalla lista movimenti (keyword proposta dalla descrizione); ricategorizzazione delle voci ancora senza categoria e pagina dei **conflitti** tra le tue scelte e le regole (la scelta viene ricordata).
+- **Budget mensili per categoria**, con avanzamento del mese (o dell'anno), ritmo atteso a oggi e categorie sforate in evidenza.
+- **Andamento del saldo cumulato** (entrate − uscite) con selettore periodo 1S / 1M / 3M / 6M / YTD / 1A / MAX.
+- Entrate e uscite del periodo, barre per anno e per mese, torta e classifica delle categorie con confronto sull'anno precedente, spesa per card, **uscite ricorrenti** (abbonamenti, utenze, rate) con il loro peso sulle uscite.
+- **Filtri** per anno, mese, categoria, card e testo, anche in esclusione, che valgono per movimenti, totali, grafico e ricorrenti. Lista movimenti ordinabile per colonna e paginata (100 per pagina), con categoria modificabile in linea.
+
+### Investimenti
+
+- **Operazioni** di acquisto/vendita con commissioni e broker; PMC (prezzo medio di carico) commissioni incluse; strumento scelto per ticker; storico modificabile in linea, duplicabile e paginato (100 per pagina).
+- **Prezzi automatici**: Yahoo Finance per gli ETF (ticker `.MI`, EUR) e CoinGecko per le crypto. Aggiornamento all'avvio e ogni 6 ore, più pulsante manuale.
+- **Valore del portafoglio** e andamento con selettore periodo (rendimento TWR al netto dei flussi) e i punti di acquisto/vendita sul grafico; P&L lordo e **netto stimato dopo le imposte**, rendimento annualizzato, max drawdown, miglior/peggior giorno, commissioni, costo TER annuo, allocazione, flussi mensili del PAC, dettaglio per posizione e per lotto.
 - **Fisco (stime)**: 26% su plusvalenze ETF in regime amministrato (aliquota configurabile per strumento), crypto in regime dichiarativo (26% fino al 2025, 33% dal 2026 — L. 207/2024), imposta di bollo 0,2%, IVAFE 0,2%, riepilogo del realizzato per anno.
-- **Dettaglio posizione** con storico, operazioni e plusvalenze realizzate.
-- **Broker**: ogni operazione può essere associata a un broker (configurabili, con logo, dal pannello di amministrazione).
-- **Valute**: locale italiano ovunque; strumenti quotati in EUR o USD (tipicamente le crypto) — i valori USD sono convertiti in EUR al cambio EURUSD del giorno per totali e stime fiscali.
-- **Marker operazioni sul grafico**: i momenti di acquisto/vendita (PAC, crypto) sono visualizzabili come punti sul grafico del portafoglio, filtrabili (nessuna / ETF / crypto / tutte).
-- **Backup automatici** almeno una volta al giorno con rotazione a 10 giorni; pannello di **amministrazione** per backup manuali, download, ripristino (anche da file caricato) e gestione broker.
-- **Spese**: tracker delle finanze personali da CSV bancari, con categorie e keyword gestite dalla UI, ricategorizzazione delle voci senza categoria, pagina dei conflitti tra le tue scelte e le regole, statistiche per categoria, card e ricorrenti.
+- **Zainetto fiscale**: minusvalenze riportabili per quattro anni (art. 68 TUIR), separate per regime: crypto (dichiarativo, compensano le plusvalenze crypto successive e abbassano le imposte stimate) ed ETF per broker (amministrato: non compensano le plusvalenze ETF, che sono redditi di capitale). Per ogni minus: uso negli anni, residuo e scadenza.
+- **Valute**: strumenti quotati in EUR o USD (tipicamente le crypto), convertiti in EUR al cambio EURUSD del giorno per totali e stime fiscali.
+
+### Generale
+
+- **Admin**: backup manuali e automatici (almeno uno al giorno, rotazione a 10 giorni), download e ripristino anche da file; gestione di card, strumenti e broker con logo; import CSV e svuotamento per ciascuna area; **dati demo** per provare l'app.
+- **Tema scuro** (predefinito) **e chiaro**, dal pulsante in fondo alla barra laterale; la scelta resta salvata nel browser.
 
 > Le stime fiscali sono indicative e non costituiscono consulenza. Le minusvalenze da ETF non compensano le plusvalenze da ETF (redditi di capitale vs redditi diversi).
 
 ## Installazione
 
-L'immagine è pubblicata su GitHub Container Registry: `ghcr.io/purpleturtle73/cunti:latest` (release specifica: `:1.2.3`).
+Tre modi, a seconda di dove vuoi tenerlo:
 
-Il database SQLite vive in `/data/cunti.db` (volume `cunti-data`); i backup automatici in `/data/backups`. Al primo avvio il DB parte vuoto (per dati di prova vedi [Dati demo](#dati-demo)).
+| Dove | Come | Raggiungibile da |
+|---|---|---|
+| Server Linux (consigliato) | [container Podman](#linux-container-podman) | tutti i dispositivi della rete locale/VPN |
+| PC Windows | [eseguibile unico](#windows-eseguibile-unico) | solo quel PC |
+| Qualsiasi sistema con Node.js | [senza container](#senza-container-nodejs) | come lo configuri |
 
-L'immagine include un **healthcheck** (`/api/health`, ogni 30 s): `podman ps` mostra lo stato `healthy`/`unhealthy` del container.
+In tutti i casi al primo avvio il database parte vuoto: per provare l'app usa i [dati demo](#dati-demo). La **versione in esecuzione** si legge in Admin (sotto il titolo) e in `/api/health` (campo `version`): `1.2.3` per le release del tag `v1.2.3`, `main-<sha>` per le build di verifica, `dev` per una build locale.
 
-La **release in esecuzione** si legge in Amministrazione (sotto il titolo) e in `/api/health` (campo `version`): `1.2.3` per le immagini pubblicate da un tag `v1.2.3`, `main-<sha>` per le build di verifica, `dev` fuori da un'immagine.
+### Linux: container Podman
 
-### Podman Quadlet (consigliato — Rocky Linux o qualsiasi distro con systemd)
+L'immagine è pubblicata su GitHub Container Registry: `ghcr.io/purpleturtle73/cunti:latest` (o una release specifica: `:1.2.3`). Il database vive in `/data/cunti.db` dentro il volume `cunti-data`, i backup automatici in `/data/backups`. L'immagine ha un **healthcheck** (`/api/health`, ogni 30 s): `podman ps` mostra `healthy`/`unhealthy`.
+
+#### Podman Quadlet (consigliato — Rocky Linux o qualsiasi distro con systemd)
 
 Rootless, con avvio automatico al boot. Crea `~/.config/containers/systemd/cunti.container`:
 
 ```ini
 [Unit]
-Description=Cunti - portfolio tracker
+Description=Cunti - personal finance tracker
 
 [Container]
 Image=ghcr.io/purpleturtle73/cunti:latest
@@ -79,9 +97,9 @@ Su Rocky Linux con SELinux e firewalld ricordati di aprire la porta:
 sudo firewall-cmd --add-port=3030/tcp --permanent && sudo firewall-cmd --reload
 ```
 
-### Podman run
+#### Prova veloce con podman run
 
-Per una prova veloce senza systemd:
+Senza systemd:
 
 ```sh
 podman run -d --name cunti \
@@ -90,25 +108,46 @@ podman run -d --name cunti \
   ghcr.io/purpleturtle73/cunti:latest
 ```
 
-### Locale con npm (senza container)
+### Windows: eseguibile unico
 
-Richiede Node.js 22+:
+Un solo file, `cunti-<versione>-windows-x64.exe`, niente da installare (Node.js è incluso). Si scarica dalla pagina **Releases** del repository, allegato a ogni release a partire dalla prossima. Prima di allora, o per provare l'ultima versione di `main`: *Actions* → l'ultimo run riuscito su `main` → artifact `cunti-windows-x64` (resta disponibile 14 giorni).
+
+1. Mettilo in una cartella tua, per esempio `Documenti\Cunti`: **database e backup vengono creati lì**, accanto all'exe. Non in `Programmi`, che non è scrivibile: in quel caso l'exe te lo dice e si ferma.
+2. Doppio clic: si apre una finestra di console e poi il browser su `http://127.0.0.1:3030`. Chiudendo la finestra l'app si ferma.
+3. Per aggiornare sostituisci l'exe con quello nuovo: i dati restano nella cartella. Per spostare i dati su un altro PC copia la cartella intera.
+
+Nella cartella dell'exe trovi `cunti.db` (il database), `backups\` (i backup automatici) e, durante un import, `import-staging\`.
+
+Note:
+
+- L'app ascolta solo su questo PC (`127.0.0.1`), perché non ha autenticazione.
+- Porta già occupata, o vuoi un'altra cartella per i dati? Avvialo da un prompt con le variabili `PORT` e `DATA_DIR`. Da PowerShell: `$env:PORT = '3031'; .\cunti.exe`. Da cmd: `set PORT=3031` e poi `cunti.exe`.
+- L'exe non è firmato: al primo avvio Windows SmartScreen può mostrare "PC protetto da Windows" → *Ulteriori informazioni* → *Esegui comunque*. Qualche antivirus può segnalarlo per lo stesso motivo.
+- Al primo avvio di ogni versione i file dell'app vengono estratti in `%LOCALAPPDATA%\Cunti\app` (qualche MB; le versioni vecchie vengono tolte da sole).
+
+L'exe viene costruito dalla CI su `windows-latest` ([`desktop/build-exe.mjs`](desktop/build-exe.mjs), una Node.js Single Executable Application) e provato avviandolo davvero prima di pubblicarlo.
+
+### Senza container (Node.js)
+
+Su Linux, macOS o Windows, con Node.js 22+:
 
 ```sh
 npm ci
 npm run build
-DATA_DIR=./data PORT=3030 node build/index.js
+DATA_DIR=./data PORT=3030 BODY_SIZE_LIMIT=200M node build/index.js
 ```
 
-Il DB viene creato in `$DATA_DIR/cunti.db` (default `./data`).
+Il database viene creato in `$DATA_DIR/cunti.db` (default `./data`). `BODY_SIZE_LIMIT` serve per importare CSV grandi e caricare backup (il default di adapter-node è 512 KB). Ascolta su tutte le interfacce: per limitarlo al PC aggiungi `HOST=127.0.0.1`.
+
+Puoi anche costruirti l'eseguibile unico per la piattaforma su cui sei, con un `node` ufficiale (quello di nodejs.org; i pacchetti delle distribuzioni Linux spesso non vanno bene): `npm run build && npm run build:exe` → `dist/cunti` (o `dist\cunti.exe` su Windows), che si comporta come quello di Windows descritto sopra.
 
 ## Uso
 
-1. **Amministrazione → Transazioni** → aggiungi ogni ETF con il ticker Yahoo (es. `SWDA.MI`), ISIN, TER, aliquota e valuta (EUR o USD); le crypto con l'ID CoinGecko (es. `bitcoin`). Alla creazione viene scaricato lo storico prezzi completo (per le crypto max 365 giorni: limite dell'API gratuita CoinGecko).
-2. Nella stessa pagina configura i broker (nome + logo), importa le transazioni da CSV (con anteprima: niente viene scritto prima della conferma) o svuotale tutte per il ciclo esporta→modifica→reimporta. In **Amministrazione → Generale** gestisci i backup: esecuzione manuale, download, ripristino da lista o da file caricato. I backup girano comunque da soli almeno una volta al giorno, con rotazione a 10 giorni.
-3. **Transazioni** → registra acquisti e vendite scegliendo lo strumento per ticker, con quantità, prezzo, commissioni e broker (prezzi nella valuta dello strumento); da qui esporti anche lo storico in CSV.
-4. **Dashboard** → tutto il resto è calcolato; col filtro "Operazioni" vedi i punti di acquisto/vendita sul grafico.
-5. **Spese** → importa il CSV della banca in **Amministrazione → Spese**, poi in **Categorie** definisci categorie e keyword (puoi partire dal set suggerito o da un JSON) e rilancia la categorizzazione sulle voci ancora senza categoria. In **Conflitti** trovi le voci in cui la tua categoria non coincide con le regole: applichi la regola o tieni la tua, e la scelta viene ricordata.
+Il menu ha tre voci: **Finanze**, **Investimenti** e **Admin**.
+
+1. **Finanze** → importa il CSV della banca in **Admin → Finanze** (con anteprima: niente viene scritto prima della conferma; se il formato non è quello di Cunti ti viene chiesto quali colonne usare, e puoi salvare la scelta come profilo della banca), poi in **Admin → Categorie** definisci categorie e keyword (puoi partire dal set suggerito o da un JSON) e rilancia la categorizzazione sulle voci ancora senza categoria. Più comodo ancora: nella lista movimenti il pulsante ⚑ crea una regola dalla voce stessa. In **Admin → Conflitti** trovi le voci in cui la tua categoria non coincide con le regole: applichi la regola o tieni la tua, e la scelta viene ricordata. Nella pagina Finanze trovi statistiche, grafico, budget (si impostano da lì, "Imposta i budget") e movimenti, tutti filtrabili.
+2. **Investimenti** → in **Admin → Investimenti** aggiungi ogni ETF con il ticker Yahoo (es. `SWDA.MI`), ISIN, TER, aliquota e valuta (EUR o USD) e le crypto con l'ID CoinGecko (es. `bitcoin`); alla creazione viene scaricato lo storico prezzi completo (per le crypto max 365 giorni: limite dell'API gratuita CoinGecko). Lì configuri anche i broker (nome + logo) e importi le operazioni da CSV. Nella pagina Investimenti registri acquisti e vendite (strumento scelto per ticker, prezzi nella valuta dello strumento), esporti lo storico in CSV e trovi tutto il resto calcolato.
+3. **Admin → Generale** → backup: esecuzione manuale, download, ripristino da lista o da file caricato. I backup girano comunque da soli almeno una volta al giorno, con rotazione a 10 giorni. Ogni area ha anche uno **svuotamento** con backup automatico, per il ciclo esporta → modifica → svuota → reimporta.
 
 ## Sviluppo
 
@@ -117,44 +156,32 @@ npm install
 npm run dev              # http://localhost:5173
 npm run check            # type-check
 npm test                 # unit test (vitest)
+npm run build            # build di produzione in build/
+npm run build:exe        # eseguibile unico in dist/ (dopo build, con un node ufficiale)
 ```
 
-Stack: SvelteKit (Svelte 5) + adapter-node, SQLite (better-sqlite3), grafici SVG custom. Variabili: `DATA_DIR` (default `./data`), `PORT` (default `3030` in produzione), `BODY_SIZE_LIMIT` (dimensione massima di un upload; impostata a `200M` nell'immagine, il default di adapter-node è 512 KB e farebbe fallire con 413 import CSV e upload di backup — se lanci `node build/index.js` a mano impostala anche tu).
+Stack: SvelteKit (Svelte 5) + adapter-node, SQLite (better-sqlite3), grafici SVG custom. Variabili: `DATA_DIR` (default `./data`; nell'exe la cartella dell'exe), `PORT` (default `3030` in produzione), `HOST` (default tutte le interfacce; nell'exe `127.0.0.1`), `BODY_SIZE_LIMIT` (dimensione massima di un upload; `200M` nell'immagine e nell'exe, il default di adapter-node è 512 KB e farebbe fallire con 413 import CSV e upload di backup — se lanci `node build/index.js` a mano impostala anche tu).
 
 ### Dati demo
 
-[`scripts/make-demo-db.js`](scripts/make-demo-db.js) genera un database demo **separato** con dati generici: 2 ETF (EUR) + una crypto (USD), ~2 anni di prezzi sintetici e cambio EURUSD (random walk deterministico, riproducibile), 2 broker con logo, un PAC mensile di 18 rate, acquisti crypto sparsi e una vendita. Le date sono relative a oggi.
+Per provare l'app senza i propri dati: **Admin → Finanze → Dati demo** e **Admin → Investimenti → Dati demo**. Funzionano solo su un'area vuota, così dati finti e veri non si mescolano; per toglierli si usa lo svuotamento dell'area. I dati sono deterministici e con date relative a oggi.
+
+- **Finanze**: circa due anni di movimenti (stipendio, affitto, bollette, abbonamenti, spesa, ristoranti, viaggi…) su tre conti correnti, un conto trading e tre carte di credito. Categorie e keyword vengono **sostituite** dal solo set di default e le card configurate dalle sole card demo, dopo un backup automatico da cui recuperare le proprie. Alcune voci restano senza categoria e alcune sono in conflitto con le regole, così anche Categorie e Conflitti hanno qualcosa da mostrare.
+- **Investimenti**: due ETF e una crypto finti (simboli `DEMO…`, esclusi dall'aggiornamento prezzi) con circa due anni di prezzi sintetici e cambio EURUSD, due broker con logo, un PAC mensile di 18 rate, acquisti crypto sparsi e una vendita.
+
+Per uno sviluppo locale da zero:
 
 ```sh
-npm run demo:db                      # crea ./data/demo-cunti.db
-DATA_DIR=./tmp/demo npm run demo:db  # oppure in un'altra DATA_DIR
+DATA_DIR=./tmp/demo npm run dev   # DB vuoto in ./tmp/demo, poi i pulsanti "Crea dati demo" in Admin
 ```
-
-Il file prodotto è `DATA_DIR/demo-cunti.db`; se esiste già, lo script **chiede conferma** prima di sovrascrivere. È pensato per l'uso manuale: per provarlo nell'app copialo come `cunti.db` nella `DATA_DIR` scelta, es.
-
-```sh
-DATA_DIR=./tmp/demo npm run demo:db
-cp tmp/demo/demo-cunti.db tmp/demo/cunti.db
-DATA_DIR=./tmp/demo npm run dev
-```
-
-### Anonimizzare una copia locale
-
-I dati veri vivono nel container. Per lavorare in locale su una copia realistica ma senza dati personali:
-
-```sh
-npm run anonymize                       # anonimizza ./data/cunti.db in place, chiede conferma
-DATA_DIR=./tmp/copia npm run anonymize  # oppure un'altra DATA_DIR
-```
-
-Lo script fa prima una copia di sicurezza in `./tmp/anonimizzazione/` (contiene i dati veri: eliminala a verifica fatta), poi sostituisce descrizioni, importi, nomi di card, broker e categorie personali, e alla fine compatta il file perché le stringhe originali non restino nelle pagine libere. Non tocca i backup: li elenca se possono ancora contenere dati veri.
 
 ### Immagine container e release
 
-Il workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) fa due cose:
+Il workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 - **push su `main` o pull request** → `svelte-check` + test unitari (vitest) + build di produzione + build di verifica dell'immagine, **senza pubblicare nulla**;
-- **push di un tag `v*`** → stessi test, poi build e **push su ghcr.io** con i tag `<versione>`, `<major>.<minor>` e `latest`.
+- **push di un tag `v*`** → stessi test, poi build e **push su ghcr.io** con i tag `<versione>`, `<major>.<minor>` e `latest`;
+- in entrambi i casi costruisce e prova l'**exe Windows**; sui tag lo allega alla release GitHub.
 
 Per rilasciare una nuova versione:
 

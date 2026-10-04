@@ -1,10 +1,17 @@
 <!doctype html>
-<html lang="it" class="dark">
+<html lang="it" data-theme="dark">
 	<head>
 		<meta charset="utf-8" />
 		<link rel="icon" href="%sveltekit.assets%/favicon.svg" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<meta name="color-scheme" content="dark" />
+		<meta name="color-scheme" content="dark light" />
+		<script>
+			// tema salvato applicato prima del primo paint: niente lampo di tema sbagliato
+			try {
+				var t = localStorage.getItem('cunti:theme');
+				if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+			} catch (e) {}
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

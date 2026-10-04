@@ -112,7 +112,7 @@
 		flex-direction: column;
 		gap: 0.15rem;
 		font-size: 0.8rem;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+		box-shadow: 0 8px 24px var(--shadow);
 		white-space: nowrap;
 		z-index: 2;
 	}
