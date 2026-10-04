@@ -13,7 +13,14 @@ import {
 	renameCategoryInRules,
 	saveMeta
 } from '$lib/server/categorize';
-import { allBrokers, allCards, db, getSetting, type Instrument } from '$lib/server/db';
+import {
+	allBrokers,
+	allCards,
+	allInstruments,
+	db,
+	getSetting,
+	type Instrument
+} from '$lib/server/db';
 import { parseExpensesCsv } from '$lib/server/expensecsv';
 import {
 	applyStaging,
@@ -24,11 +31,19 @@ import {
 } from '$lib/server/expenses';
 import { log, logError } from '$lib/server/log';
 import { refreshFx, refreshInstrument } from '$lib/server/prices';
+import {
+	applyTxStaging,
+	discardTxStaging,
+	stageTxImport,
+	wipeTransactions
+} from '$lib/server/transactions';
+import { parseTransactionsCsv } from '$lib/server/txcsv';
 import type { Actions, PageServerLoad } from './$types';
 
 const LOGO_MIMES = ['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp'];
 const LOGO_MAX_BYTES = 512 * 1024;
 const UPLOAD_MAX_BYTES = 200 * 1024 * 1024;
+const TX_CSV_MAX_BYTES = 2 * 1024 * 1024;
 
 export const load: PageServerLoad = () => {
 	const brokers = db
@@ -323,6 +338,75 @@ export const actions: Actions = {
 		// le spese referenziano la card per nome: restano intatte, perdono solo il logo
 		db.prepare('DELETE FROM cards WHERE id = ?').run(id);
 		return { section: 'card', success: 'Card eliminata (le spese restano intatte).' };
+	},
+
+	// ---------- Transazioni: import CSV a due fasi, svuotamento ----------
+
+	importTransactions: async ({ request }) => {
+		const form = await request.formData();
+		const file = form.get('file');
+		if (!(file instanceof File) || file.size === 0)
+			return fail(400, { section: 'tx-import', importErrors: ['Seleziona un file CSV.'] });
+		if (file.size > TX_CSV_MAX_BYTES)
+			return fail(400, { section: 'tx-import', importErrors: ['File troppo grande (max 2 MB).'] });
+
+		const { rows, errors } = parseTransactionsCsv(
+			await file.text(),
+			allInstruments(),
+			allBrokers()
+		);
+		if (errors.length > 0) {
+			log('transazioni', `CSV "${file.name}" rifiutato: ${errors.length} errori`);
+			return fail(400, { section: 'tx-import', importErrors: errors });
+		}
+		if (rows.length === 0)
+			return fail(400, { section: 'tx-import', importErrors: ['Nessuna riga da importare.'] });
+
+		// Nomi distinti da quelli dell'import spese (txPreview/txApplied): le action
+		// condividono il tipo ActionData, e due `preview` di forma diversa non si
+		// riuscirebbero a distinguere nel template.
+		const txPreview = stageTxImport(rows);
+		log(
+			'transazioni',
+			`CSV "${file.name}" in staging: ${txPreview.toInsert} nuove, ${txPreview.skippedDuplicates} duplicate`
+		);
+		return { section: 'tx-import', txPreview };
+	},
+
+	applyTransactionImport: async ({ request }) => {
+		const form = await request.formData();
+		const res = applyTxStaging(String(form.get('token') || ''));
+		if (!res)
+			return fail(400, {
+				section: 'tx-import',
+				importErrors: ['Import scaduto o già applicato: ricarica il file.']
+			});
+		return { section: 'tx-import', txApplied: res };
+	},
+
+	cancelTransactionImport: async ({ request }) => {
+		const form = await request.formData();
+		discardTxStaging(String(form.get('token') || ''));
+		return { section: 'tx-import', txCancelled: true };
+	},
+
+	wipeTransactions: async ({ request }) => {
+		const form = await request.formData();
+		if (form.get('confirm') !== 'ELIMINA')
+			return fail(400, {
+				section: 'tx-dati',
+				error: 'Conferma non valida: scrivi ELIMINA nel campo.'
+			});
+		try {
+			const n = await wipeTransactions();
+			return {
+				section: 'tx-dati',
+				success: `Eliminate ${n} transazioni (backup creato prima dello svuotamento).`
+			};
+		} catch (e) {
+			logError('transazioni', 'svuotamento transazioni fallito', e);
+			return fail(500, { section: 'tx-dati', error: `Svuotamento fallito: ${String(e)}` });
+		}
 	},
 
 	// ---------- Spese: import CSV a due fasi ----------

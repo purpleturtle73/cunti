@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 process.env.DATA_DIR = 'tmp/test-backup';
 fs.rmSync('tmp/test-backup', { recursive: true, force: true });
 
-const { db, setSetting, getSetting } = await import('./db');
+const { db, setSetting, getSetting, DATA_DIR } = await import('./db');
 const { BACKUP_DIR, backupPath, createBackup, deleteBackup, listBackups, restoreBackup } =
 	await import('./backup');
 
@@ -68,5 +68,70 @@ describe('restore', () => {
 		fs.writeFileSync(bogus, 'non sono un database');
 		expect(() => restoreBackup('upload-bogus-20260101-000000.db')).toThrow();
 		deleteBackup('upload-bogus-20260101-000000.db');
+	});
+});
+
+describe('backup: categories.json/categories-meta.json abbinati al backup', () => {
+	it('createBackup salva una copia dei json con lo stesso stem del .db', async () => {
+		fs.writeFileSync(path.join(DATA_DIR, 'categories.json'), '{"a":["x"]}');
+		fs.writeFileSync(path.join(DATA_DIR, 'categories-meta.json'), '{"a":{"icon":"car"}}');
+
+		const info = await createBackup();
+		const stem = info.name.replace(/\.db$/, '');
+		expect(fs.readFileSync(path.join(BACKUP_DIR, `${stem}.categories.json`), 'utf8')).toBe(
+			'{"a":["x"]}'
+		);
+		expect(fs.existsSync(path.join(BACKUP_DIR, `${stem}.categories-meta.json`))).toBe(true);
+	});
+
+	it('restoreBackup riporta i json allo stato di quel backup, non all’attuale', async () => {
+		fs.writeFileSync(path.join(DATA_DIR, 'categories.json'), '{"a":["al-momento-del-backup"]}');
+		const info = await createBackup();
+
+		// modifica successiva al backup: diversa dal contenuto appena salvato
+		fs.writeFileSync(path.join(DATA_DIR, 'categories.json'), '{"a":["dopo-il-backup"]}');
+
+		restoreBackup(info.name);
+
+		expect(fs.readFileSync(path.join(DATA_DIR, 'categories.json'), 'utf8')).toBe(
+			'{"a":["al-momento-del-backup"]}'
+		);
+	});
+
+	it('restore di un backup senza json abbinato (upload, o pre-funzionalità) non tocca i json attuali', async () => {
+		fs.writeFileSync(path.join(DATA_DIR, 'categories.json'), '{"a":["corrente"]}');
+		const current = await createBackup();
+		const legacy = path.join(BACKUP_DIR, 'cunti-20200601-000000000.db');
+		fs.copyFileSync(path.join(BACKUP_DIR, current.name), legacy); // nessun json abbinato per questo stem
+
+		restoreBackup('cunti-20200601-000000000.db');
+
+		expect(fs.readFileSync(path.join(DATA_DIR, 'categories.json'), 'utf8')).toBe(
+			'{"a":["corrente"]}'
+		);
+		deleteBackup('cunti-20200601-000000000.db');
+	});
+
+	it('rotazione e cancellazione eliminano anche i json abbinati', async () => {
+		fs.writeFileSync(path.join(DATA_DIR, 'categories.json'), '{"a":["da-ruotare"]}');
+		const info = await createBackup();
+		const stem = info.name.replace(/\.db$/, '');
+		const pairedPath = path.join(BACKUP_DIR, `${stem}.categories.json`);
+		expect(fs.existsSync(pairedPath)).toBe(true);
+
+		deleteBackup(info.name);
+		expect(fs.existsSync(pairedPath)).toBe(false);
+
+		// rotazione: backup "vecchio" con json abbinato, scaduto dalla creazione di uno nuovo
+		fs.writeFileSync(path.join(DATA_DIR, 'categories.json'), '{"a":["vecchio"]}');
+		const oldInfo = await createBackup();
+		const oldStem = oldInfo.name.replace(/\.db$/, '');
+		const oldJson = path.join(BACKUP_DIR, `${oldStem}.categories.json`);
+		const old = new Date(Date.now() - 11 * 24 * 60 * 60 * 1000);
+		fs.utimesSync(path.join(BACKUP_DIR, oldInfo.name), old, old);
+
+		await createBackup(); // fa scattare rotate()
+		expect(fs.existsSync(path.join(BACKUP_DIR, oldInfo.name))).toBe(false);
+		expect(fs.existsSync(oldJson)).toBe(false);
 	});
 });

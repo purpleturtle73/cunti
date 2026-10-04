@@ -7,9 +7,16 @@
 	let today = new Date().toISOString().slice(0, 10);
 
 	let selectedInstrumentId = $state<number | undefined>();
+
+	// Nei menu lo strumento si sceglie per ticker, quindi l'ordine è per ticker:
+	// allInstruments() ordina per nome (giusto altrove, arbitrario in una lista di simboli).
+	let instrumentsByTicker = $derived(
+		[...data.instruments].sort((a, b) => a.symbol.localeCompare(b.symbol))
+	);
+
 	let formCurrency = $derived(
 		data.instruments.find((i) => i.id === Number(selectedInstrumentId))?.currency ??
-			data.instruments[0]?.currency ??
+			instrumentsByTicker[0]?.currency ??
 			'EUR'
 	);
 	let ccySymbol = $derived(formCurrency === 'EUR' ? '€' : formCurrency);
@@ -45,8 +52,8 @@
 			<label class="field">
 				Strumento
 				<select name="instrument_id" bind:value={selectedInstrumentId} required>
-					{#each data.instruments as inst (inst.id)}
-						<option value={inst.id}>{inst.name} ({inst.symbol})</option>
+					{#each instrumentsByTicker as inst (inst.id)}
+						<option value={inst.id} title={inst.name}>{inst.symbol}</option>
 					{/each}
 				</select>
 			</label>
@@ -101,44 +108,12 @@
 </section>
 
 <section class="card">
-	<h2>Importa da CSV</h2>
-	<form method="POST" action="?/import" enctype="multipart/form-data" use:enhance class="import-form">
-		<input type="file" name="file" accept=".csv,text/csv" required />
-		<button class="btn" type="submit">Importa (senza duplicati)</button>
-	</form>
-	{#if form?.imported !== undefined}
-		<p class="ok">
-			Importate {form.imported} transazioni{#if form.skipped}, saltate {form.skipped} già presenti
-				(righe {form.skippedLines?.join(', ')}){/if}.
-		</p>
-	{/if}
-	{#if form?.importErrors}
-		<ul class="error import-errors">
-			{#each form.importErrors as err (err)}
-				<li>{err}</li>
-			{/each}
-		</ul>
-	{/if}
-	<p class="hint">
-		Intestazione richiesta: <code>data;tipo;quantita;prezzo</code> più <code>strumento</code>
-		e/o <code>isin</code> (opzionali: <code>commissioni</code>, <code>broker</code>,
-		<code>note</code>). Separatore <code>;</code> o
-		<code>,</code>, data <code>YYYY-MM-DD</code> o <code>GG/MM/AAAA</code>, decimali con virgola o
-		punto. <strong>strumento</strong> = simbolo (es. <code>SWDA.MI</code>, <code>bitcoin</code>),
-		<strong>isin</strong> = ISIN censito sullo strumento (es. <code>IE00B4L5Y983</code>): se
-		presente vince sul simbolo, e se i due indicano strumenti diversi la riga è un errore.
-		<strong>tipo</strong> = <code>acquisto</code>/<code>vendita</code> (o buy/sell),
-		<strong>broker</strong> = nome esistente. Le righe vengono aggiunte allo storico
-		<strong>senza duplicati</strong>: quelle identiche a transazioni già presenti (stesso strumento,
-		tipo, data, quantità, prezzo e commissioni) vengono saltate e segnalate. Con errori di formato
-		non viene importato nulla.
-	</p>
-</section>
-
-<section class="card">
 	<div class="sec-head">
 		<h2>Storico ({data.transactions.length})</h2>
-		<a class="btn ghost" href="/api/transactions/export" download>Esporta CSV</a>
+		<div class="sec-actions">
+			<span class="muted">Import CSV in <a class="link" href="/admin">Amministrazione</a></span>
+			<a class="btn ghost" href="/api/transactions/export" download>Esporta CSV</a>
+		</div>
 	</div>
 	{#if data.transactions.length === 0}
 		<p class="muted">Nessuna operazione registrata.</p>
@@ -176,8 +151,8 @@
 								<td><input form="edit-tx" type="date" name="date" value={tx.date} max={today} required /></td>
 								<td>
 									<select form="edit-tx" name="instrument_id" required>
-										{#each data.instruments as inst (inst.id)}
-											<option value={inst.id} selected={inst.id === tx.instrument_id}>{inst.name} ({inst.symbol})</option>
+										{#each instrumentsByTicker as inst (inst.id)}
+											<option value={inst.id} selected={inst.id === tx.instrument_id} title={inst.name}>{inst.symbol}</option>
 										{/each}
 									</select>
 								</td>
@@ -318,6 +293,13 @@
 		gap: 1rem;
 		flex-wrap: wrap;
 	}
+	.sec-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.9rem;
+		flex-wrap: wrap;
+		font-size: 0.82rem;
+	}
 	.inst-cell {
 		white-space: nowrap;
 	}
@@ -374,29 +356,6 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		color: var(--ink-2);
-	}
-	.import-form {
-		display: flex;
-		gap: 0.8rem;
-		align-items: center;
-		flex-wrap: wrap;
-	}
-	.import-errors {
-		margin: 0.8rem 0 0;
-		padding-left: 1.2rem;
-	}
-	.import-errors li {
-		margin: 0.15rem 0;
-	}
-	.ok {
-		color: #7fd67f;
-		margin: 0.8rem 0 0;
-		font-size: 0.85rem;
-	}
-	.hint code {
-		background: var(--surface-2);
-		border-radius: 4px;
-		padding: 0.05rem 0.3rem;
 	}
 	.row-actions {
 		white-space: nowrap;

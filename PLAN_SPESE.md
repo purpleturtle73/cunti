@@ -9,13 +9,14 @@ Questo documento resta come riferimento delle decisioni di design. Stato sinteti
 - [x] **M1 — Dati**: tabella `expenses`, parser `expensecsv.ts` (colonne derivate opzionali, extra ignorate), motore regole su `categories.json` (semantica script Python: substring case-insensitive, longest-match), dedup a conteggio, import a due fasi con staging+anteprima+conferma, card di default per upload, 20 unit test.
 - [x] **M2 — Gestione**: movimenti con filtri/ricerca e categoria inline, pannello categorie (icone, **"Escludi dai totali"** per giroconti/doppi conteggi tipo `investimenti`/`ignore`/`carte_credito`, rinomina con propagazione DB+json+meta), regole (test descrizione, retro-applicazione unknown con anteprima, report utilizzo keyword), export CSV round-trip, svuota con backup automatico.
 - [x] **M3 — Dashboard**: tiles, barre per anno/mese cliccabili, donut + classifica categorie con Δ anno precedente, riga tile spese in home, chips filtri attivi con ✕ e "Mostra tutto".
-- [x] **Extra oltre il piano**: gestione **card/conti con logo** (tabella `cards` stile broker, logo in movimenti); sezioni di gestione spostate in /admin (import, categorie, regole, card, svuota — /spese è solo consultazione); export CSV round-trip anche per le transazioni investimenti; copia dei json accanto ai backup; sanificazione dati personali nel repo.
+- [x] **Extra oltre il piano**: gestione **card/conti con logo** (tabella `cards` stile broker, logo in movimenti); sezioni di gestione spostate in /admin (import, categorie, regole, card, svuota — /spese è solo consultazione); export CSV round-trip anche per le transazioni investimenti; copia dei json **versionata per backup** (stesso stem del `.db`: ruotata e ripristinata insieme — vedi "Backup dei json", 2026-10-03); sanificazione dati personali nel repo.
 
 ### Da fare
 
 - [ ] **Panoramica unificata** (sotto, decisa 2026-07-07): home mista portafoglio+spese, dashboard investimenti in `/investimenti`.
 - [ ] **M4 — Rifiniture**: editor in-app di `categories.json`, budget mensile per categoria, note su movimento, azioni bulk sulla lista movimenti.
 - [ ] Collaudo con lo storico reale (10 anni, 4 banche) + pulizia `categories.json` guidata dal report keyword.
+- [ ] **Pulizia keyword morte in `categories.json`**: 4 keyword in sintassi regex mai matchate dallo script originale (substring letterale, non regex) — `PV[0-9][0-9][0-9][0-9]`, `sushi(mi)?`, `supermercat[io]`, `DECO['']?` (vedi "Categorizzazione" sotto). Da riscrivere come substring semplici o rimuovere; il report utilizzo keyword (già in M2) le segnala a zero match.
 
 ## Panoramica unificata (da fare)
 
@@ -170,14 +171,16 @@ Nota: reimportare un file modificato **senza** wipe funziona ma non è un "updat
 | Formattazione it-IT | `lib/format.ts` |
 | Backup | `backup.ts` copia l'intero DB, incluse le nuove tabelle (restore già copia solo colonne comuni) |
 
-Attenzione: `categories.json` sta in `DATA_DIR` ma **fuori dal DB** → i backup `.db` non lo includono. Mitigazione semplice: alla creazione di un backup si copia anche `categories.json` in `backups/` (stesso timestamp), oppure lo tieni versionato altrove (è già un file di testo, git-friendly).
+### Backup dei json (fatto, 2026-10-03)
+
+`categories.json`/`categories-meta.json` stanno in `DATA_DIR` ma **fuori dal DB** → i backup `.db` non li includono di per sé. Risolto in `backup.ts`: ogni `createBackup()` salva una copia dei json con **lo stesso stem** del `.db` (`cunti-<stamp>.categories.json`), così sono versionati 1:1 col backup — non un'unica copia "ultima nota" sovrascritta a ogni giro (che sarebbe stata inutile: la copia sarebbe sempre quella di *adesso*, non quella di quando il backup è stato preso). `rotate()` e `deleteBackup()` eliminano anche i json abbinati; `restoreBackup()` li ripristina insieme al `.db`. I backup precedenti a questa funzionalità (e i file `.db` caricati a mano) non hanno json abbinato: il restore procede comunque, i json restano quelli attuali. Resta la mitigazione alternativa per chi preferisce: tenere `categories.json` versionato a parte (git), dato che è già testo.
 
 ## Milestone
 
 - **M1 — Dati**: tabella + migrazione, parser `expensecsv.ts` (colonne derivate opzionali, extra ignorate), motore matching su `categories.json` (rilettura a ogni import, validazione, longest-match), dedup a conteggio, **import a due fasi** (staging + anteprima con diff conflitti categoria + conferma), card di default, unit test (parser, dedup a conteggio, coerenza importo/moneyin-out, longest-match, categoria CSV che vince, conflitti rilevati, json malformato). Import reale dei 10 anni di storico come collaudo.
 - **M2 — Gestione**: lista movimenti con filtri (card, categoria, giroconti), ricerca e icone categoria; modifica inline categoria + snippet "keyword da incollare nel json"; **export CSV completo** (round-trip) e **svuota spese** (backup automatico + doppia conferma); pannello categorie (icona, colore, flag giroconto, **rinomina con propagazione** a voci + json); report utilizzo keyword; test descrizione→categoria; retro-applicazione regole alle unknown con anteprima.
 - **M3 — Dashboard**: viste pluriennale/anno/mese/categorie (icone in legende e classifiche), tile riassuntive, riga tile spese in home.
-- **M4 — Rifiniture**: editor in-app di `categories.json`, copia dei json accanto ai backup, budget mensile per categoria (opzionale), note su movimento, azioni bulk sulla lista.
+- **M4 — Rifiniture**: editor in-app di `categories.json`, budget mensile per categoria (opzionale), note su movimento, azioni bulk sulla lista.
 
 ## Decisioni prese (2026-07-06)
 

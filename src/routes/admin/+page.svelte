@@ -2,7 +2,7 @@
 	import { enhance } from '$app/forms';
 	import CategoryIcon from '$lib/components/CategoryIcon.svelte';
 	import { ICON_NAMES } from '$lib/expense-icons';
-	import { fmtDate, fmtEur } from '$lib/format';
+	import { fmtCurrency, fmtDate, fmtEur } from '$lib/format';
 
 	let { data, form } = $props();
 
@@ -237,6 +237,105 @@
 				</li>
 			{/each}
 		</ul>
+	{/if}
+</section>
+
+<section class="card">
+	<h2>Transazioni: importa CSV</h2>
+	{#if form?.section === 'tx-import' && form.txPreview}
+		{@const p = form.txPreview}
+		<div class="preview">
+			<p>
+				<strong>Anteprima</strong> — {p.total} righe nel file:
+				<strong class="ok-text">{p.toInsert} nuove</strong>,
+				{p.skippedDuplicates} già presenti (saltate).
+				{#if p.skippedLines.length > 0}
+					<span class="muted">Righe saltate: {p.skippedLines.join(', ')}.</span>
+				{/if}
+			</p>
+
+			{#if p.rows.length > 0}
+				<div class="scroll-x">
+					<table class="data compact">
+						<thead>
+							<tr>
+								<th>Riga</th>
+								<th>Data</th>
+								<th>Strumento</th>
+								<th>Tipo</th>
+								<th class="num">Quantità</th>
+								<th class="num">Prezzo</th>
+								<th class="num">Commissioni</th>
+								<th>Broker</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each p.rows as r (r.line)}
+								<tr>
+									<td class="muted">{r.line}</td>
+									<td class="nowrap">{fmtDate(r.date)}</td>
+									<td><code>{r.symbol}</code></td>
+									<td>{r.type === 'buy' ? 'Acquisto' : 'Vendita'}</td>
+									<td class="num">{r.quantity.toLocaleString('it-IT', { maximumFractionDigits: 8 })}</td>
+									<td class="num nowrap">{fmtCurrency(r.price, r.currency)}</td>
+									<td class="num nowrap">{fmtCurrency(r.fee, r.currency)}</td>
+									<td>{r.broker ?? '—'}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+				{#if p.truncated > 0}
+					<p class="muted">… e altre {p.truncated} righe non mostrate (verranno importate comunque).</p>
+				{/if}
+			{:else}
+				<p class="muted">Nessuna riga nuova: il file è già tutto nel database.</p>
+			{/if}
+
+			<form method="POST" action="?/applyTransactionImport" use:enhance>
+				<input type="hidden" name="token" value={p.token} />
+				<div class="preview-actions">
+					<button class="btn" type="submit" disabled={p.toInsert === 0}>Conferma import</button>
+				</div>
+			</form>
+			<form method="POST" action="?/cancelTransactionImport" use:enhance class="cancel-form">
+				<input type="hidden" name="token" value={p.token} />
+				<button class="btn ghost" type="submit">Annulla</button>
+			</form>
+		</div>
+	{:else}
+		<form method="POST" action="?/importTransactions" enctype="multipart/form-data" use:enhance class="import-form">
+			<input type="file" name="file" accept=".csv,text/csv" required />
+			<button class="btn" type="submit">Carica e mostra anteprima</button>
+		</form>
+		{#if form?.section === 'tx-import' && form.txApplied}
+			<p class="ok">
+				Import applicato: {form.txApplied.inserted} transazioni inserite{form.txApplied.skipped > 0
+					? `, ${form.txApplied.skipped} saltate come duplicate`
+					: ''}.
+			</p>
+		{/if}
+		{#if form?.section === 'tx-import' && form.txCancelled}
+			<p class="muted">Import annullato, nessuna modifica.</p>
+		{/if}
+		{#if form?.section === 'tx-import' && form.importErrors}
+			<ul class="error import-errors">
+				{#each form.importErrors as err (err)}<li>{err}</li>{/each}
+			</ul>
+		{/if}
+		<p class="muted hint">
+			Colonne minime: <code>data;tipo;quantita;prezzo</code> più <code>strumento</code> e/o
+			<code>isin</code>. Opzionali: <code>commissioni</code>, <code>broker</code>,
+			<code>note</code>. Separatore <code>;</code> o <code>,</code>, data <code>YYYY-MM-DD</code> o
+			<code>GG/MM/AAAA</code>, decimali con virgola o punto. <strong>strumento</strong> = simbolo (es.
+			<code>SWDA.MI</code>, <code>bitcoin</code>), <strong>isin</strong> = ISIN censito sullo strumento:
+			se presente vince sul simbolo, e se i due indicano strumenti diversi la riga è un errore.
+			<strong>tipo</strong> = <code>acquisto</code>/<code>vendita</code> (o buy/sell),
+			<strong>broker</strong> = nome esistente. Nulla viene scritto prima della conferma; le righe
+			identiche a transazioni già presenti (stesso strumento, tipo, data, quantità, prezzo e
+			commissioni) vengono saltate, quindi reimportare lo stesso file è idempotente. Con errori di
+			formato non viene importato nulla.
+		</p>
 	{/if}
 </section>
 
@@ -556,6 +655,31 @@
 		</div>
 		<p class="muted hint">Le keyword a 0 match (evidenziate) sono candidate alla rimozione dal file.</p>
 	{/if}
+</section>
+
+<section class="card danger-zone">
+	<h2>Transazioni: svuota</h2>
+	<p class="muted">
+		Per la modifica di massa: <a class="link" href="/api/transactions/export" download>esporta il CSV</a>,
+		modificalo, svuota qui e reimporta. Prima dello svuotamento viene creato automaticamente un backup
+		del database. Strumenti, storico prezzi e broker <strong>non</strong> vengono toccati.
+	</p>
+	{#if form?.section === 'tx-dati'}
+		{#if form.error}<p class="error">{form.error}</p>{/if}
+		{#if 'success' in (form ?? {}) && form.success}<p class="ok">{form.success}</p>{/if}
+	{/if}
+	<form
+		method="POST"
+		action="?/wipeTransactions"
+		use:enhance
+		class="wipe-form"
+		onsubmit={(e) => {
+			if (!confirm('Eliminare TUTTE le transazioni? Viene creato un backup prima.')) e.preventDefault();
+		}}
+	>
+		<input type="text" name="confirm" placeholder="scrivi ELIMINA" required />
+		<button class="btn danger" type="submit">Svuota tutte le transazioni</button>
+	</form>
 </section>
 
 <section class="card danger-zone">

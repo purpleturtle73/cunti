@@ -9,6 +9,8 @@ const RETENTION_DAYS = 10;
 const NAME_RE = /^cunti-\d{8}-\d{6,9}\.db$/;
 // Nomi ammessi per il restore: backup generati o file caricati (sanificati in saveUploadedBackup)
 const RESTORE_RE = /^[A-Za-z0-9._-]+\.db$/;
+// File di configurazione testuali salvati accanto a ogni backup (stesso "stem" del .db)
+const CONFIG_FILES = ['categories.json', 'categories-meta.json'];
 
 export interface BackupInfo {
 	name: string;
@@ -22,22 +24,37 @@ function stamp(d = new Date()): string {
 	return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}${p(d.getMilliseconds(), 3)}`;
 }
 
-/** Elimina i backup automatici più vecchi di RETENTION_DAYS giorni. */
+/** Nome dei file di config abbinati a un backup .db: stesso "stem", suffisso diverso.
+ *  cunti-20260101-120000000.db → cunti-20260101-120000000.categories.json */
+function configFileName(dbName: string, configFile: string): string {
+	return `${dbName.replace(/\.db$/, '')}.${configFile}`;
+}
+
+/** Elimina i backup automatici più vecchi di RETENTION_DAYS giorni, insieme ai file
+ *  di configurazione abbinati (stesso stem). */
 function rotate() {
 	const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
 	for (const f of fs.readdirSync(BACKUP_DIR)) {
 		if (!NAME_RE.test(f)) continue; // non toccare file caricati a mano
 		const full = path.join(BACKUP_DIR, f);
-		if (fs.statSync(full).mtimeMs < cutoff) fs.unlinkSync(full);
+		if (fs.statSync(full).mtimeMs < cutoff) {
+			fs.unlinkSync(full);
+			for (const cf of CONFIG_FILES) {
+				const paired = path.join(BACKUP_DIR, configFileName(f, cf));
+				if (fs.existsSync(paired)) fs.unlinkSync(paired);
+			}
+		}
 	}
 }
 
 /** I file di configurazione testuali (regole/meta categorie spese) vivono fuori dal DB:
- *  a ogni backup se ne salva l'ultima copia in backups/ (sovrascritta, non ruotata). */
-function copyConfigFiles() {
-	for (const f of ['categories.json', 'categories-meta.json']) {
+ *  a ogni backup se ne salva una copia abbinata allo stesso .db (stesso stem), così il
+ *  restore può riportare anche *quello* stato e non solo l'ultimo conosciuto. Ruotata
+ *  insieme al .db a cui è abbinata (sopra, in `rotate`). */
+function copyConfigFiles(dbName: string) {
+	for (const f of CONFIG_FILES) {
 		const src = path.join(DATA_DIR, f);
-		if (fs.existsSync(src)) fs.copyFileSync(src, path.join(BACKUP_DIR, f));
+		if (fs.existsSync(src)) fs.copyFileSync(src, path.join(BACKUP_DIR, configFileName(dbName, f)));
 	}
 }
 
@@ -48,8 +65,8 @@ export async function createBackup(): Promise<BackupInfo> {
 	const full = path.join(BACKUP_DIR, name);
 	await db.backup(full);
 	setSetting('last_backup', new Date().toISOString());
+	copyConfigFiles(name);
 	rotate();
-	copyConfigFiles();
 	const st = fs.statSync(full);
 	log('backup', `creato ${name} (${st.size} byte)`);
 	return { name, size: st.size, mtime: st.mtime.toISOString() };
@@ -78,6 +95,10 @@ export function backupPath(name: string): string {
 
 export function deleteBackup(name: string) {
 	fs.unlinkSync(backupPath(name));
+	for (const cf of CONFIG_FILES) {
+		const paired = path.join(BACKUP_DIR, configFileName(name, cf));
+		if (fs.existsSync(paired)) fs.unlinkSync(paired);
+	}
 	log('backup', `eliminato ${name}`);
 }
 
@@ -100,7 +121,11 @@ const TABLES = ['settings', 'brokers', 'instruments', 'transactions', 'prices', 
 
 /** Ripristina un backup nel DB vivo: svuota le tabelle e copia le righe dal file,
  *  in un'unica transazione (ATTACH). Copia solo le colonne in comune, così un
- *  backup di una versione precedente dello schema resta ripristinabile. */
+ *  backup di una versione precedente dello schema resta ripristinabile.
+ *  Ripristina anche `categories.json`/`categories-meta.json` abbinati a quello
+ *  specifico backup, se presenti (i backup più vecchi di questa funzionalità e i
+ *  file caricati a mano non li hanno: in quel caso il DB viene ripristinato comunque
+ *  e i json restano quelli attuali). */
 export function restoreBackup(name: string) {
 	log('backup', `restore da ${name} avviato`);
 	const full = backupPath(name);
@@ -152,6 +177,12 @@ export function restoreBackup(name: string) {
 		db.exec('DETACH restore');
 	}
 	db.pragma('wal_checkpoint(TRUNCATE)');
+
+	for (const cf of CONFIG_FILES) {
+		const paired = path.join(BACKUP_DIR, configFileName(name, cf));
+		if (fs.existsSync(paired)) fs.copyFileSync(paired, path.join(DATA_DIR, cf));
+	}
+
 	log('backup', `restore da ${name} completato`);
 }
 

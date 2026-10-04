@@ -8,17 +8,16 @@
  * La categoria NON fa parte della chiave: una riga con chiave esistente ma categoria
  * diversa è un "conflitto" mostrato in anteprima (scelta: tieni DB / usa CSV).
  */
-import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 import { createBackup } from './backup';
 import { loadRules, matchCategory } from './categorize';
-import { DATA_DIR, db, type Expense } from './db';
+import { db, type Expense } from './db';
 import { log } from './log';
+import {
+	discardStaging as discardStagingFile,
+	readStaging,
+	writeStaging
+} from './staging';
 import type { ParsedExpense } from './expensecsv';
-
-const STAGING_DIR = () => path.join(DATA_DIR, 'import-staging');
-const STAGING_TTL_MS = 60 * 60 * 1000;
 
 export interface StagedRow {
 	line: number;
@@ -85,17 +84,6 @@ interface StagingFile {
 	conflicts: ImportConflict[];
 }
 
-function cleanStaleStaging() {
-	try {
-		for (const f of fs.readdirSync(STAGING_DIR())) {
-			const p = path.join(STAGING_DIR(), f);
-			if (Date.now() - fs.statSync(p).mtimeMs > STAGING_TTL_MS) fs.rmSync(p, { force: true });
-		}
-	} catch {
-		/* cartella assente */
-	}
-}
-
 /** Costruisce l'anteprima e salva lo staging su file. Nessuna scrittura sul DB. */
 export function stageImport(rows: ParsedExpense[], defaultCard: string): ImportPreview {
 	const { staged, rulesError, rulesWarnings } = categorizeRows(rows, defaultCard);
@@ -147,11 +135,8 @@ export function stageImport(rows: ParsedExpense[], defaultCard: string): ImportP
 		}
 	}
 
-	cleanStaleStaging();
-	fs.mkdirSync(STAGING_DIR(), { recursive: true });
-	const token = crypto.randomUUID();
 	const payload: StagingFile = { createdAt: new Date().toISOString(), rows: toInsert, conflicts: [...conflicts.values()] };
-	fs.writeFileSync(path.join(STAGING_DIR(), `${token}.json`), JSON.stringify(payload));
+	const token = writeStaging('spese', payload);
 
 	return {
 		token,
@@ -166,18 +151,8 @@ export function stageImport(rows: ParsedExpense[], defaultCard: string): ImportP
 	};
 }
 
-function readStaging(token: string): StagingFile | null {
-	if (!/^[0-9a-f-]{36}$/.test(token)) return null;
-	try {
-		return JSON.parse(fs.readFileSync(path.join(STAGING_DIR(), `${token}.json`), 'utf-8'));
-	} catch {
-		return null;
-	}
-}
-
 export function discardStaging(token: string) {
-	if (!/^[0-9a-f-]{36}$/.test(token)) return;
-	fs.rmSync(path.join(STAGING_DIR(), `${token}.json`), { force: true });
+	discardStagingFile('spese', token);
 }
 
 /** Applica lo staging: inserisce le nuove righe e risolve i conflitti scelti come "csv". */
@@ -185,7 +160,7 @@ export function applyStaging(
 	token: string,
 	useCsvCategory: Set<string> // chiavi (keyOf) dei conflitti da aggiornare alla categoria del CSV
 ): { inserted: number; updatedCategories: number } | null {
-	const staging = readStaging(token);
+	const staging = readStaging<StagingFile>('spese', token);
 	if (!staging) return null;
 
 	const insert = db.prepare(

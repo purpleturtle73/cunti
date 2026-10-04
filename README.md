@@ -105,8 +105,8 @@ Il DB viene creato in `$DATA_DIR/cunti.db` (default `./data`).
 ## Uso
 
 1. **Strumenti** → aggiungi ogni ETF con il ticker Yahoo (es. `SWDA.MI`), ISIN, TER, aliquota e valuta (EUR o USD); le crypto con l'ID CoinGecko (es. `bitcoin`). Alla creazione viene scaricato lo storico prezzi completo (per le crypto max 365 giorni: limite dell'API gratuita CoinGecko).
-2. **Amministrazione** → configura i broker (nome + logo) e gestisci i backup: esecuzione manuale, download, ripristino da lista o da file caricato. I backup girano comunque da soli almeno una volta al giorno, con rotazione a 10 giorni.
-3. **Transazioni** → registra acquisti e vendite con quantità, prezzo, commissioni e broker (prezzi nella valuta dello strumento).
+2. **Amministrazione** → configura i broker (nome + logo), importa le transazioni da CSV (con anteprima: niente viene scritto prima della conferma) o svuotale tutte per il ciclo esporta→modifica→reimporta, e gestisci i backup: esecuzione manuale, download, ripristino da lista o da file caricato. I backup girano comunque da soli almeno una volta al giorno, con rotazione a 10 giorni.
+3. **Transazioni** → registra acquisti e vendite scegliendo lo strumento per ticker, con quantità, prezzo, commissioni e broker (prezzi nella valuta dello strumento); da qui esporti anche lo storico in CSV.
 4. **Dashboard** → tutto il resto è calcolato; col filtro "Operazioni" vedi i punti di acquisto/vendita sul grafico.
 
 ## Sviluppo

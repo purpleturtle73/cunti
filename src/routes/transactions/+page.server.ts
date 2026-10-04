@@ -1,7 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { allBrokers, allInstruments, db, insertTransactionsDedup } from '$lib/server/db';
-import { log } from '$lib/server/log';
-import { parseTransactionsCsv } from '$lib/server/txcsv';
+import { allBrokers, allInstruments, db } from '$lib/server/db';
 import type { Actions, PageServerLoad } from './$types';
 
 function readTxForm(form: FormData) {
@@ -108,34 +106,5 @@ export const actions: Actions = {
 		if (!id) return fail(400, { error: 'ID mancante.' });
 		db.prepare('DELETE FROM transactions WHERE id = ?').run(id);
 		return { success: true };
-	},
-
-	import: async ({ request }) => {
-		const form = await request.formData();
-		const file = form.get('file');
-		if (!(file instanceof File) || file.size === 0)
-			return fail(400, { importErrors: ['Seleziona un file CSV.'] });
-		if (file.size > 2 * 1024 * 1024)
-			return fail(400, { importErrors: ['File troppo grande (max 2 MB).'] });
-
-		const text = await file.text();
-		const { rows, errors } = parseTransactionsCsv(text, allInstruments(), allBrokers());
-		if (errors.length > 0) {
-			log('import', `CSV "${file.name}" rifiutato: ${errors.length} errori`);
-			return fail(400, { importErrors: errors });
-		}
-		if (rows.length === 0) return fail(400, { importErrors: ['Nessuna riga da importare.'] });
-
-		const { inserted, duplicates } = insertTransactionsDedup(rows);
-		log(
-			'import',
-			`CSV "${file.name}": ${inserted.length} inserite, ${duplicates.length} duplicate saltate su ${rows.length}`
-		);
-		return {
-			success: true,
-			imported: inserted.length,
-			skipped: duplicates.length,
-			skippedLines: duplicates.map((d) => d.line)
-		};
 	}
 };
