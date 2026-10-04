@@ -63,6 +63,31 @@ describe('restore', () => {
 		expect(getSetting('marker')).toBeNull();
 	});
 
+	it('ripristina anche spese, card e categorie (prima mancavano dal restore)', async () => {
+		db.prepare("INSERT INTO cards (name) VALUES ('Visa')").run();
+		db.prepare(
+			"INSERT INTO expenses (date, description, card, amount, category, category_manual) VALUES ('2026-01-01', 'Esselunga', 'Visa', -10, 'spesa', 1)"
+		).run();
+		db.prepare("INSERT INTO expense_categories (name, transfer) VALUES ('spesa', 0)").run();
+		db.prepare("INSERT INTO expense_keywords (category, keyword) VALUES ('spesa', 'esselunga')").run();
+		const info = await createBackup();
+
+		// come "svuota spese": tutto via dopo il backup
+		db.prepare('DELETE FROM expenses').run();
+		db.prepare('DELETE FROM expense_categories').run();
+		db.prepare('DELETE FROM cards').run();
+
+		restoreBackup(info.name);
+
+		const n = (t: string) => (db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n;
+		expect(n('expenses')).toBe(1);
+		expect(n('cards')).toBe(1);
+		expect(n('expense_categories')).toBe(1);
+		expect(n('expense_keywords')).toBe(1);
+		const e = db.prepare('SELECT category, category_manual FROM expenses').get() as { category: string; category_manual: number };
+		expect(e).toEqual({ category: 'spesa', category_manual: 1 });
+	});
+
 	it('rifiuta file che non sono database SQLite di Cunti', () => {
 		const bogus = path.join(BACKUP_DIR, 'upload-bogus-20260101-000000.db');
 		fs.writeFileSync(bogus, 'non sono un database');

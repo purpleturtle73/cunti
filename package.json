@@ -11,7 +11,8 @@
 		"prepare": "svelte-kit sync",
 		"check": "svelte-check --tsconfig ./tsconfig.json",
 		"test": "vitest run",
-		"demo:db": "node scripts/make-demo-db.js"
+		"demo:db": "node scripts/make-demo-db.js",
+		"anonymize": "node scripts/anonymize-db.js"
 	},
 	"dependencies": {
 		"better-sqlite3": "^12.2.0"

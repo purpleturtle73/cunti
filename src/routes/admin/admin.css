@@ -1,0 +1,377 @@
+/* Stili condivisi dell'area Amministrazione (tutte le sottopagine).
+ * Importato da routes/admin/+layout.svelte; ogni regola è limitata a .admin-area,
+ * il contenitore del layout, così non tocca il resto dell'app. */
+.admin-area .page-title {
+	font-size: 1.7rem;
+	margin-bottom: 0.3rem;
+}
+.admin-area .app-version {
+	margin: 0 0 1.2rem;
+	font-size: 0.85rem;
+	color: var(--ink-3);
+}
+.admin-area .app-version code {
+	background: var(--surface-2);
+	border-radius: 4px;
+	padding: 0.05rem 0.4rem;
+	color: var(--ink-2);
+	font-weight: 600;
+}
+.admin-area section.card {
+	margin-bottom: 1rem;
+}
+.admin-area .sec-head {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 1rem;
+	flex-wrap: wrap;
+}
+.admin-area .muted {
+	color: var(--ink-3);
+}
+.admin-area .muted code {
+	background: var(--surface-2);
+	border-radius: 4px;
+	padding: 0.05rem 0.3rem;
+}
+.admin-area .error {
+	color: var(--bad);
+	margin: 0.8rem 0 0;
+	font-size: 0.85rem;
+}
+.admin-area .ok {
+	color: #7fd67f;
+	margin: 0.8rem 0 0;
+	font-size: 0.85rem;
+}
+.admin-area .scroll-x {
+	overflow-x: auto;
+}
+.admin-area .inst-form {
+	display: grid;
+	grid-template-columns: 1fr 1.2fr 1.6fr 0.6fr 1fr 0.7fr 0.7fr;
+	gap: 0.8rem;
+	align-items: end;
+}
+@media (max-width: 1000px) {
+	.admin-area .inst-form {
+		grid-template-columns: 1fr 1fr;
+	}
+}
+.admin-area .inst-form input,
+.admin-area .inst-form select {
+	width: 100%;
+	min-width: 0;
+}
+.admin-area .inst-form .field {
+	min-width: 0;
+}
+.admin-area .hint {
+	margin: 0.9rem 0;
+	font-size: 0.78rem;
+	max-width: 70rem;
+}
+.admin-area .warning {
+	color: var(--series-3);
+	margin: 0.8rem 0 0;
+	font-size: 0.85rem;
+}
+.admin-area .mini {
+	width: 60px;
+	text-align: right;
+	padding: 0.25rem 0.4rem;
+}
+.admin-area .inline-edit {
+	display: inline;
+}
+.admin-area .pos-link {
+	font-weight: 600;
+}
+.admin-area .pos-link:hover {
+	color: var(--accent);
+}
+.admin-area .err-cell {
+	max-width: 420px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--bad);
+	font-size: 0.8rem;
+}
+.admin-area .row-actions {
+	display: flex;
+	gap: 0.4rem;
+	align-items: center;
+	justify-content: flex-end;
+}
+.admin-area .btn.sm {
+	font-size: 0.75rem;
+	padding: 0.3rem 0.6rem;
+}
+.admin-area .del {
+	background: none;
+	border: none;
+	color: var(--ink-3);
+	cursor: pointer;
+	font-size: 0.85rem;
+	padding: 0.2rem 0.4rem;
+	border-radius: 6px;
+}
+.admin-area .del:hover {
+	color: var(--bad);
+	background: rgba(230, 103, 103, 0.12);
+}
+.admin-area .upload {
+	margin-top: 1.1rem;
+	display: flex;
+	gap: 0.8rem;
+	align-items: end;
+	flex-wrap: wrap;
+}
+.admin-area .broker-form {
+	display: grid;
+	grid-template-columns: 1fr 1fr auto;
+	gap: 0.8rem;
+	align-items: end;
+	margin: 1rem 0 1.2rem;
+}
+@media (max-width: 800px) {
+	.admin-area .broker-form {
+		grid-template-columns: 1fr;
+	}
+}
+.admin-area .broker-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+}
+.admin-area .broker-list li {
+	display: flex;
+	align-items: center;
+	gap: 0.8rem;
+	padding: 0.55rem 0.2rem;
+	border-top: 1px solid var(--border);
+}
+.admin-area .broker-list img,
+.admin-area .logo-fallback {
+	width: 28px;
+	height: 28px;
+	border-radius: 7px;
+	object-fit: contain;
+	background: var(--surface-2);
+	flex: none;
+}
+.admin-area .logo-fallback {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-weight: 700;
+	font-size: 0.8rem;
+	color: var(--ink-2);
+}
+.admin-area .broker-name {
+	font-weight: 600;
+}
+.admin-area .tx-count {
+	font-size: 0.78rem;
+}
+.admin-area .logo-update {
+	margin-left: auto;
+}
+.admin-area .hidden-file {
+	display: none;
+}
+.admin-area .nowrap {
+	white-space: nowrap;
+}
+.admin-area .desc-cell {
+	max-width: 380px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--ink-2);
+}
+.admin-area table.compact th,
+.admin-area table.compact td {
+	padding-top: 0.35rem;
+	padding-bottom: 0.35rem;
+}
+.admin-area .import-form {
+	display: flex;
+	gap: 0.8rem;
+	align-items: end;
+	flex-wrap: wrap;
+}
+.admin-area .import-errors {
+	margin: 0.8rem 0 0;
+	padding-left: 1.2rem;
+}
+.admin-area .preview {
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-sm);
+	padding: 0.9rem 1rem;
+	margin-bottom: 0.6rem;
+}
+.admin-area .preview-actions {
+	margin-top: 0.9rem;
+	display: flex;
+	gap: 0.8rem;
+}
+.admin-area .cancel-form {
+	margin-top: 0.5rem;
+}
+.admin-area .bulk-choice {
+	display: flex;
+	gap: 0.6rem;
+	margin-top: 0.5rem;
+}
+.admin-area .radio {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	margin-right: 0.5rem;
+	font-size: 0.8rem;
+}
+.admin-area .ok-text {
+	color: #7fd67f;
+}
+.admin-area .warn-text,
+.admin-area .warning {
+	color: var(--series-3);
+}
+.admin-area .warning {
+	margin: 0.8rem 0 0;
+	font-size: 0.85rem;
+}
+.admin-area .hint {
+	margin: 0.9rem 0 0;
+	font-size: 0.78rem;
+}
+.admin-area .hint code {
+	background: var(--surface-2);
+	border-radius: 4px;
+	padding: 0.05rem 0.3rem;
+}
+.admin-area .inline-edit {
+	display: inline;
+}
+.admin-area .sub-title {
+	font-size: 0.78rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--ink-3);
+	margin: 1.4rem 0 0.5rem;
+}
+.admin-area .rename-form {
+	display: flex;
+	gap: 0.3rem;
+	align-items: center;
+}
+.admin-area .rename-input {
+	width: 110px;
+	padding: 0.2rem 0.4rem;
+	font-size: 0.78rem;
+}
+.admin-area .rules-tools {
+	display: flex;
+	gap: 0.8rem;
+	align-items: center;
+	flex-wrap: wrap;
+	margin-top: 0.8rem;
+}
+.admin-area .test-form {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+	flex-wrap: wrap;
+}
+.admin-area .test-result {
+	font-size: 0.85rem;
+}
+.admin-area .inline-form {
+	display: inline;
+}
+.admin-area .small-list {
+	font-size: 0.8rem;
+	margin: 0.4rem 0;
+	padding-left: 1.2rem;
+}
+.admin-area .warn-details {
+	margin-top: 0.6rem;
+}
+.admin-area .warn-details summary {
+	cursor: pointer;
+	font-size: 0.85rem;
+}
+.admin-area .report {
+	margin-top: 0.8rem;
+	max-height: 420px;
+	overflow-y: auto;
+}
+.admin-area tr.dead td {
+	color: var(--series-3);
+}
+.admin-area .danger-zone {
+	border-color: rgba(230, 103, 103, 0.35);
+}
+.admin-area .wipe-form {
+	display: flex;
+	gap: 0.8rem;
+	align-items: center;
+	flex-wrap: wrap;
+	margin-top: 0.6rem;
+}
+.admin-area .btn.danger {
+	background: rgba(230, 103, 103, 0.15);
+	color: #f0a3a3;
+	border: 1px solid rgba(230, 103, 103, 0.4);
+}
+.admin-area .btn.danger:hover {
+	background: rgba(230, 103, 103, 0.25);
+}
+.admin-area .link {
+	color: var(--accent);
+	font-weight: 600;
+}
+
+/* navigazione interna dell'area */
+.admin-area .admin-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.3rem;
+	margin: 0 0 1.2rem;
+	padding-bottom: 0.6rem;
+	border-bottom: 1px solid var(--border);
+}
+.admin-area .admin-tab {
+	padding: 0.4rem 0.85rem;
+	border-radius: var(--radius-sm);
+	color: var(--ink-2);
+	font-size: 0.88rem;
+	font-weight: 500;
+}
+.admin-area .admin-tab.child {
+	font-size: 0.82rem;
+	color: var(--ink-3);
+}
+.admin-area .admin-tab.child::before {
+	content: '↳ ';
+	opacity: 0.6;
+}
+.admin-area .admin-tab:hover {
+	background: rgba(255, 255, 255, 0.05);
+	color: var(--ink);
+}
+.admin-area .admin-tab.active {
+	background: linear-gradient(120deg, rgba(57, 135, 229, 0.18), rgba(144, 133, 233, 0.14));
+	box-shadow: inset 0 0 0 1px rgba(57, 135, 229, 0.35);
+	color: var(--ink);
+}
+.admin-area .area-intro {
+	margin: -0.4rem 0 1.1rem;
+	font-size: 0.85rem;
+}

@@ -299,8 +299,347 @@ export function distinctCards(): string[] {
 	return (db.prepare('SELECT DISTINCT card FROM expenses ORDER BY card').all() as { card: string }[]).map((r) => r.card);
 }
 
+export interface CardUsage {
+	card: string;
+	count: number;
+	first: string;
+	last: string;
+}
+
+/** Valori distinti del campo `card` con quante spese li usano: serve al pannello di
+ *  normalizzazione in /admin (gli export bancari producono varianti di battitura). */
+export function cardUsage(): CardUsage[] {
+	return db
+		.prepare(
+			`SELECT card, COUNT(*) AS count, MIN(date) AS first, MAX(date) AS last
+			 FROM expenses GROUP BY card ORDER BY count DESC, card`
+		)
+		.all() as CardUsage[];
+}
+
+/** Rinomina un valore `card` su tutte le spese. Rinominare verso un valore già
+ *  esistente **unisce** le due varianti: è il modo di accorpare `bancomatAlfa` in
+ *  `BancomatAlfa`. Ritorna le righe toccate. */
+export function renameCard(from: string, to: string): number {
+	const info = db.prepare('UPDATE expenses SET card = ? WHERE card = ?').run(to, from);
+	if (info.changes > 0) log('spese', `card "${from}" → "${to}" su ${info.changes} spese`);
+	return info.changes;
+}
+
+export interface CardTotal {
+	card: string;
+	moneyOut: number;
+	moneyIn: number;
+	count: number;
+}
+
+/** Totali per valore `card` nel periodo (prefix ISO "2026" / "2026-03", '' = tutto).
+ *  Raggruppa sul valore grezzo: il roll-up sulle card configurate avviene in UI con
+ *  `cardGroupLabel`, così la regola di abbinamento resta una sola. */
+export function cardTotals(prefix: string, transfers: Set<string>): CardTotal[] {
+	const t = [...transfers];
+	return db
+		.prepare(
+			`SELECT card,
+				SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS moneyOut,
+				SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS moneyIn,
+				COUNT(*) AS count
+			 FROM expenses WHERE date LIKE ? || '%' ${notTransferSql(transfers)}
+			 GROUP BY card ORDER BY moneyOut DESC`
+		)
+		.all(prefix, ...t) as CardTotal[];
+}
+
+/** Andamento di una singola categoria: per anno se `year` è vuoto, altrimenti per
+ *  mese dentro quell'anno. Etichette nello stesso formato di yearlyInOut/monthlyInOut. */
+export function categoryTrend(category: string, year: string): InOut[] {
+	if (year) {
+		return db
+			.prepare(
+				`SELECT substr(date, 1, 7) AS label,
+					SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS moneyIn,
+					SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS moneyOut
+				 FROM expenses WHERE category = ? AND substr(date, 1, 4) = ?
+				 GROUP BY label ORDER BY label`
+			)
+			.all(category, year) as InOut[];
+	}
+	return db
+		.prepare(
+			`SELECT substr(date, 1, 4) AS label,
+				SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS moneyIn,
+				SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS moneyOut
+			 FROM expenses WHERE category = ?
+			 GROUP BY label ORDER BY label`
+		)
+		.all(category) as InOut[];
+}
+
+/** Quante spese hanno una categoria vera e quante sono ancora `unknown` nel periodo.
+ *  Le statistiche per categoria sono incomplete di quella quota, quindi va detto. */
+export function coverage(prefix: string): { total: number; unknown: number } {
+	return db
+		.prepare(
+			`SELECT COUNT(*) AS total,
+				SUM(CASE WHEN category = 'unknown' THEN 1 ELSE 0 END) AS unknown
+			 FROM expenses WHERE date LIKE ? || '%'`
+		)
+		.get(prefix) as { total: number; unknown: number };
+}
+
+/** Mesi distinti con almeno una spesa nel periodo: denominatore delle medie mensili. */
+export function monthsInPeriod(prefix: string): number {
+	return (
+		db
+			.prepare(
+				`SELECT COUNT(DISTINCT substr(date, 1, 7)) AS n FROM expenses WHERE date LIKE ? || '%'`
+			)
+			.get(prefix) as { n: number }
+	).n;
+}
+
+export interface Recurring {
+	label: string; // descrizione rappresentativa (la più frequente del gruppo)
+	months: number; // mesi distinti in cui compare
+	amount: number; // importo mediano (uscita, positivo)
+	yearly: number; // stima annua = mediana × 12
+	first: string;
+	last: string;
+	active: boolean; // visto negli ultimi 90 giorni
+}
+
+/** Chiave di raggruppamento di una descrizione bancaria: minuscolo, spazi normalizzati,
+ *  via i token che contengono cifre (numeri di esercente, riferimenti, date) che
+ *  altrimenti renderebbero unica ogni occorrenza. Troncata: la coda delle descrizioni
+ *  bancarie è quasi sempre rumore. */
+function recurringKey(description: string): string {
+	return description
+		.toLowerCase()
+		.split(/\s+/)
+		.filter((w) => w !== '' && !/\d/.test(w))
+		.join(' ')
+		.slice(0, 40);
+}
+
+const median = (xs: number[]): number => {
+	const s = [...xs].sort((a, b) => a - b);
+	const m = s.length >> 1;
+	return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+
+/**
+ * Uscite che sembrano ricorrenti (abbonamenti, utenze, rate).
+ *
+ * **Euristica, da rileggere**: raggruppa le uscite per descrizione normalizzata e tiene
+ * i gruppi che compaiono in almeno `minMonths` mesi distinti e con importo stabile (almeno
+ * tre quarti delle occorrenze entro ±15% dalla mediana). La stabilità dell'importo è il
+ * segnale che distingue un abbonamento da una spesa ripetuta ma variabile (la spesa
+ * al supermercato ricorre ogni mese ma di importo diverso).
+ */
+export function recurring(transfers: Set<string>, minMonths = 4): Recurring[] {
+	const t = [...transfers];
+	const rows = db
+		.prepare(
+			`SELECT date, description, -amount AS out FROM expenses
+			 WHERE amount < 0 ${notTransferSql(transfers)}`
+		)
+		.all(...t) as { date: string; description: string; out: number }[];
+
+	const groups = new Map<
+		string,
+		{ amounts: number[]; months: Set<string>; descs: Map<string, number>; first: string; last: string }
+	>();
+	for (const r of rows) {
+		const k = recurringKey(r.description);
+		if (k === '') continue;
+		let g = groups.get(k);
+		if (!g) {
+			g = { amounts: [], months: new Set(), descs: new Map(), first: r.date, last: r.date };
+			groups.set(k, g);
+		}
+		g.amounts.push(r.out);
+		g.months.add(r.date.slice(0, 7));
+		g.descs.set(r.description, (g.descs.get(r.description) ?? 0) + 1);
+		if (r.date < g.first) g.first = r.date;
+		if (r.date > g.last) g.last = r.date;
+	}
+
+	const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+	const out: Recurring[] = [];
+	for (const g of groups.values()) {
+		if (g.months.size < minMonths) continue;
+		const med = median(g.amounts);
+		if (med <= 0) continue;
+		const stable = g.amounts.filter((a) => Math.abs(a - med) <= med * 0.15).length;
+		if (stable / g.amounts.length < 0.75) continue;
+		const label = [...g.descs.entries()].sort((a, b) => b[1] - a[1])[0][0];
+		out.push({
+			label,
+			months: g.months.size,
+			amount: med,
+			yearly: med * 12,
+			first: g.first,
+			last: g.last,
+			active: g.last >= cutoff
+		});
+	}
+	return out.sort((a, b) => Number(b.active) - Number(a.active) || b.amount - a.amount);
+}
+
 export function expenseYears(): string[] {
 	return (
 		db.prepare('SELECT DISTINCT substr(date, 1, 4) AS y FROM expenses ORDER BY y DESC').all() as { y: string }[]
 	).map((r) => r.y);
+}
+
+// ---------- Regole sulle voci esistenti: ricategorizzazione e conflitti ----------
+
+export interface RulesRunPreview {
+	unknown: number; // voci senza categoria (non bloccate)
+	matched: number; // quante le regole attuali saprebbero categorizzare
+	byCategory: { category: string; count: number }[];
+}
+
+/** Applica le regole alle voci `unknown` non bloccate. Con `apply=false` calcola
+ *  solo l'anteprima. Le voci bloccate a mano (category_manual=1) non si toccano mai. */
+export function runRulesOnUnknown(apply: boolean): RulesRunPreview & { applied: number } {
+	const { rules } = loadRules();
+	const unknowns = db
+		.prepare("SELECT id, description FROM expenses WHERE category = 'unknown' AND category_manual = 0")
+		.all() as { id: number; description: string }[];
+	const matches: { id: number; category: string }[] = [];
+	const byCategory = new Map<string, number>();
+	for (const u of unknowns) {
+		const m = matchCategory(u.description, rules);
+		if (m) {
+			matches.push({ id: u.id, category: m.category });
+			byCategory.set(m.category, (byCategory.get(m.category) ?? 0) + 1);
+		}
+	}
+	let applied = 0;
+	if (apply && matches.length > 0) {
+		const upd = db.prepare("UPDATE expenses SET category = ? WHERE id = ? AND category = 'unknown' AND category_manual = 0");
+		db.transaction(() => {
+			for (const m of matches) applied += upd.run(m.category, m.id).changes;
+		})();
+		log('spese', `regole applicate alle voci senza categoria: ${applied} categorizzate`);
+	}
+	return {
+		unknown: unknowns.length,
+		matched: matches.length,
+		byCategory: [...byCategory.entries()]
+			.map(([category, count]) => ({ category, count }))
+			.sort((a, b) => b.count - a.count),
+		applied
+	};
+}
+
+export interface ConflictItem {
+	id: number;
+	date: string;
+	description: string;
+	card: string;
+	amount: number;
+	category: string; // categoria attuale della voce
+	ruleCategory: string; // categoria che le regole assegnerebbero
+	keyword: string; // keyword che ha deciso
+	manual: boolean;
+}
+
+export interface ConflictGroup {
+	category: string;
+	ruleCategory: string;
+	count: number;
+	keywords: string[]; // keyword coinvolte, le più frequenti prima
+	items: ConflictItem[]; // ordinate per data decrescente
+}
+
+/**
+ * Voci con una categoria (non `unknown`) diversa da quella che le regole attuali
+ * assegnerebbero. `locked=false` → da rivedere (non bloccate); `locked=true` → le
+ * decisioni già prese a mano, per rivederle o sbloccarle.
+ *
+ * Nota: lo storico categorizzato prima del flag manuale non distingue tra scelta a
+ * mano e categoria ereditata dal vecchio script, quindi all'inizio può comparire
+ * molto: si smaltisce a gruppi con "applica regola" o "tieni la mia".
+ */
+export function findConflicts(locked: boolean): ConflictGroup[] {
+	const { rules } = loadRules();
+	if (rules.length === 0) return [];
+	const rows = db
+		.prepare(
+			`SELECT id, date, description, card, amount, category FROM expenses
+			 WHERE category != 'unknown' AND category_manual = ?
+			 ORDER BY date DESC, id DESC`
+		)
+		.all(locked ? 1 : 0) as Omit<ConflictItem, 'ruleCategory' | 'keyword' | 'manual'>[];
+
+	const groups = new Map<string, ConflictGroup & { kwCount: Map<string, number> }>();
+	for (const r of rows) {
+		const m = matchCategory(r.description, rules);
+		if (!m || m.category === r.category) continue;
+		const key = `${r.category}\u0000${m.category}`;
+		let g = groups.get(key);
+		if (!g) {
+			g = { category: r.category, ruleCategory: m.category, count: 0, keywords: [], items: [], kwCount: new Map() };
+			groups.set(key, g);
+		}
+		g.count++;
+		g.kwCount.set(m.keyword, (g.kwCount.get(m.keyword) ?? 0) + 1);
+		g.items.push({ ...r, ruleCategory: m.category, keyword: m.keyword, manual: locked });
+	}
+	return [...groups.values()]
+		.map(({ kwCount, ...g }) => ({
+			...g,
+			keywords: [...kwCount.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k)
+		}))
+		.sort((a, b) => b.count - a.count);
+}
+
+/** Totale conflitti da rivedere (per badge e avvisi). */
+export function conflictCount(): number {
+	return findConflicts(false).reduce((s, g) => s + g.count, 0);
+}
+
+/**
+ * Risolve conflitti. `accept` = applica la categoria delle regole (e sblocca);
+ * `keep` = tieni la tua e bloccala; `unlock` = togli il blocco senza cambiare categoria.
+ * Il bersaglio è un singolo id oppure un intero gruppo (categoria attuale → regola),
+ * ricalcolato qui così da toccare solo le voci ancora in conflitto.
+ */
+export function resolveConflicts(
+	action: 'accept' | 'keep' | 'unlock',
+	target: { id: number } | { category: string; ruleCategory: string; locked: boolean }
+): number {
+	const items =
+		'id' in target
+			? [...findConflicts(false), ...findConflicts(true)].flatMap((g) => g.items).filter((i) => i.id === target.id)
+			: findConflicts(target.locked)
+					.filter((g) => g.category === target.category && g.ruleCategory === target.ruleCategory)
+					.flatMap((g) => g.items);
+	if (items.length === 0) return 0;
+	const accept = db.prepare('UPDATE expenses SET category = ?, category_manual = 0 WHERE id = ?');
+	const lock = db.prepare('UPDATE expenses SET category_manual = 1 WHERE id = ?');
+	const unlock = db.prepare('UPDATE expenses SET category_manual = 0 WHERE id = ?');
+	let n = 0;
+	db.transaction(() => {
+		for (const i of items) {
+			if (action === 'accept') n += accept.run(i.ruleCategory, i.id).changes;
+			else if (action === 'keep') n += lock.run(i.id).changes;
+			else n += unlock.run(i.id).changes;
+		}
+	})();
+	log('spese', `conflitti: ${action} su ${n} voci`);
+	return n;
+}
+
+/** Statistiche d'uso per categoria, incluse quelle usate dalle spese ma non definite. */
+export function categoryUsage(): Map<string, { count: number; out: number; last: string | null }> {
+	const rows = db
+		.prepare(
+			`SELECT category, COUNT(*) AS count, SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS out, MAX(date) AS last
+			 FROM expenses GROUP BY category`
+		)
+		.all() as { category: string; count: number; out: number; last: string | null }[];
+	return new Map(rows.map((r) => [r.category, { count: r.count, out: r.out, last: r.last }]));
 }

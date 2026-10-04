@@ -80,7 +80,34 @@ CREATE TABLE IF NOT EXISTS expenses (
 CREATE INDEX IF NOT EXISTS idx_exp_date ON expenses(date);
 CREATE INDEX IF NOT EXISTS idx_exp_category ON expenses(category, date);
 CREATE INDEX IF NOT EXISTS idx_exp_card ON expenses(card, date);
+
+-- Categorie spese gestite dalla UI. Il campo expenses.category resta testo libero
+-- (nessuna FK): una spesa può avere una categoria non (ancora) definita qui, che la
+-- pagina categorie mostra come "non definita".
+CREATE TABLE IF NOT EXISTS expense_categories (
+	name TEXT PRIMARY KEY,
+	icon TEXT,
+	color TEXT,
+	transfer INTEGER NOT NULL DEFAULT 0, -- giroconto/doppio conteggio: escluso dai totali
+	position INTEGER NOT NULL DEFAULT 0  -- ordine: spareggio tra keyword di pari lunghezza
+);
+
+CREATE TABLE IF NOT EXISTS expense_keywords (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	category TEXT NOT NULL REFERENCES expense_categories(name) ON DELETE CASCADE ON UPDATE CASCADE,
+	keyword TEXT NOT NULL
+);
+-- una keyword appartiene a una sola categoria: due categorie con la stessa keyword
+-- renderebbero il match ambiguo
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kw_unique ON expense_keywords(keyword COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_kw_category ON expense_keywords(category);
 `);
+
+// Migrazione: flag "categoria impostata a mano" sulle spese. Le voci bloccate non
+// vengono mai ricategorizzate dalle regole e non compaiono tra i conflitti da rivedere.
+const expCols = (db.pragma('table_info(expenses)') as { name: string }[]).map((c) => c.name);
+if (!expCols.includes('category_manual'))
+	db.exec('ALTER TABLE expenses ADD COLUMN category_manual INTEGER NOT NULL DEFAULT 0');
 
 // Migrazione: broker_id su transactions (DB creati prima dei broker)
 const txCols = (db.pragma('table_info(transactions)') as { name: string }[]).map((c) => c.name);
@@ -124,6 +151,7 @@ export interface Expense {
 	card: string;
 	amount: number; // firmato: <0 uscita, >0 entrata
 	category: string;
+	category_manual: 0 | 1; // 1 = scelta manuale, le regole non la toccano
 }
 
 export function getSetting(key: string): string | null {

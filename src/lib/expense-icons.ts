@@ -1,5 +1,5 @@
 /** Set di icone per le categorie di spesa (path SVG 24×24, stroke).
- *  L'assegnazione icona→categoria vive in DATA_DIR/categories-meta.json. */
+ *  L'assegnazione icona→categoria vive nella tabella expense_categories. */
 
 export const EXPENSE_ICONS: Record<string, string> = {
 	cart: 'M4 5h2l2.2 10.5a1.5 1.5 0 0 0 1.5 1.2h7.6a1.5 1.5 0 0 0 1.5-1.2L20.5 8H7M10 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2M17 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2',
@@ -21,7 +21,10 @@ export const EXPENSE_ICONS: Record<string, string> = {
 	smoke: 'M4 15h13v3H4zM19 15v3M21 15v3M17 6a3 3 0 0 1 3 3M14 4a5 5 0 0 1 5 5',
 	digital: 'M3 5h18v12H3zM9 21h6M12 17v4',
 	book: 'M5 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H5zM19 4h-6a0 0 0 0 0 0 0v16a2 2 0 0 1 2-2h4z',
-	misc: 'M12 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2M12 18a1 1 0 1 0 0-2 1 1 0 0 0 0 2'
+	misc: 'M12 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2M12 18a1 1 0 1 0 0-2 1 1 0 0 0 0 2',
+	fun: 'M4 8a2 2 0 0 0 2-2h12a2 2 0 0 0 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 0-2 2H6a2 2 0 0 0-2-2v-2a2 2 0 0 0 0-4zM10 6v12',
+	transfer: 'M4 8h13M14 5l3 3-3 3M20 16H7M10 13l-3 3 3 3',
+	income: 'M12 3v12M8 11l4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2'
 };
 
 export const ICON_NAMES = Object.keys(EXPENSE_ICONS);

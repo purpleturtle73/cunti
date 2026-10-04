@@ -116,8 +116,22 @@ export function saveUploadedBackup(originalName: string, data: Buffer): string {
 	return name;
 }
 
-// Tabelle copiate nel restore, in ordine FK-safe (genitori prima dei figli)
-const TABLES = ['settings', 'brokers', 'instruments', 'transactions', 'prices', 'fx_rates'];
+// Tabelle copiate nel restore, in ordine FK-safe (genitori prima dei figli).
+// Devono esserci TUTTE le tabelle con dati: una tabella assente qui non viene
+// ripristinata (fino al 2026-10-04 mancavano cards ed expenses, e ripristinare il
+// backup creato da "svuota spese" non riportava indietro le spese).
+const TABLES = [
+	'settings',
+	'brokers',
+	'instruments',
+	'transactions',
+	'prices',
+	'fx_rates',
+	'cards',
+	'expenses',
+	'expense_categories',
+	'expense_keywords'
+];
 
 /** Ripristina un backup nel DB vivo: svuota le tabelle e copia le righe dal file,
  *  in un'unica transazione (ATTACH). Copia solo le colonne in comune, così un

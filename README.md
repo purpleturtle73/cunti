@@ -13,11 +13,9 @@ Tracker di portafoglio per investitore italiano: ETF di Borsa Italiana (PAC mens
 - **Valute**: locale italiano ovunque; strumenti quotati in EUR o USD (tipicamente le crypto) — i valori USD sono convertiti in EUR al cambio EURUSD del giorno per totali e stime fiscali.
 - **Marker operazioni sul grafico**: i momenti di acquisto/vendita (PAC, crypto) sono visualizzabili come punti sul grafico del portafoglio, filtrabili (nessuna / ETF / crypto / tutte).
 - **Backup automatici** almeno una volta al giorno con rotazione a 10 giorni; pannello di **amministrazione** per backup manuali, download, ripristino (anche da file caricato) e gestione broker.
-- Sezione **Spese** predisposta nella navigazione (in arrivo: tracker di finanze personali).
+- **Spese**: tracker delle finanze personali da CSV bancari, con categorie e keyword gestite dalla UI, ricategorizzazione delle voci senza categoria, pagina dei conflitti tra le tue scelte e le regole, statistiche per categoria, card e ricorrenti.
 
 > Le stime fiscali sono indicative e non costituiscono consulenza. Le minusvalenze da ETF non compensano le plusvalenze da ETF (redditi di capitale vs redditi diversi).
-
-Dettagli di implementazione, calcoli e test: [IMPLEMENTATION.md](IMPLEMENTATION.md).
 
 ## Installazione
 
@@ -106,10 +104,11 @@ Il DB viene creato in `$DATA_DIR/cunti.db` (default `./data`).
 
 ## Uso
 
-1. **Strumenti** → aggiungi ogni ETF con il ticker Yahoo (es. `SWDA.MI`), ISIN, TER, aliquota e valuta (EUR o USD); le crypto con l'ID CoinGecko (es. `bitcoin`). Alla creazione viene scaricato lo storico prezzi completo (per le crypto max 365 giorni: limite dell'API gratuita CoinGecko).
-2. **Amministrazione** → configura i broker (nome + logo), importa le transazioni da CSV (con anteprima: niente viene scritto prima della conferma) o svuotale tutte per il ciclo esporta→modifica→reimporta, e gestisci i backup: esecuzione manuale, download, ripristino da lista o da file caricato. I backup girano comunque da soli almeno una volta al giorno, con rotazione a 10 giorni.
+1. **Amministrazione → Transazioni** → aggiungi ogni ETF con il ticker Yahoo (es. `SWDA.MI`), ISIN, TER, aliquota e valuta (EUR o USD); le crypto con l'ID CoinGecko (es. `bitcoin`). Alla creazione viene scaricato lo storico prezzi completo (per le crypto max 365 giorni: limite dell'API gratuita CoinGecko).
+2. Nella stessa pagina configura i broker (nome + logo), importa le transazioni da CSV (con anteprima: niente viene scritto prima della conferma) o svuotale tutte per il ciclo esporta→modifica→reimporta. In **Amministrazione → Generale** gestisci i backup: esecuzione manuale, download, ripristino da lista o da file caricato. I backup girano comunque da soli almeno una volta al giorno, con rotazione a 10 giorni.
 3. **Transazioni** → registra acquisti e vendite scegliendo lo strumento per ticker, con quantità, prezzo, commissioni e broker (prezzi nella valuta dello strumento); da qui esporti anche lo storico in CSV.
 4. **Dashboard** → tutto il resto è calcolato; col filtro "Operazioni" vedi i punti di acquisto/vendita sul grafico.
+5. **Spese** → importa il CSV della banca in **Amministrazione → Spese**, poi in **Categorie** definisci categorie e keyword (puoi partire dal set suggerito o da un JSON) e rilancia la categorizzazione sulle voci ancora senza categoria. In **Conflitti** trovi le voci in cui la tua categoria non coincide con le regole: applichi la regola o tieni la tua, e la scelta viene ricordata.
 
 ## Sviluppo
 
@@ -138,6 +137,17 @@ DATA_DIR=./tmp/demo npm run demo:db
 cp tmp/demo/demo-cunti.db tmp/demo/cunti.db
 DATA_DIR=./tmp/demo npm run dev
 ```
+
+### Anonimizzare una copia locale
+
+I dati veri vivono nel container. Per lavorare in locale su una copia realistica ma senza dati personali:
+
+```sh
+npm run anonymize                       # anonimizza ./data/cunti.db in place, chiede conferma
+DATA_DIR=./tmp/copia npm run anonymize  # oppure un'altra DATA_DIR
+```
+
+Lo script fa prima una copia di sicurezza in `./tmp/anonimizzazione/` (contiene i dati veri: eliminala a verifica fatta), poi sostituisce descrizioni, importi, nomi di card, broker e categorie personali, e alla fine compatta il file perché le stringhe originali non restino nelle pagine libere. Non tocca i backup: li elenca se possono ancora contenere dati veri.
 
 ### Immagine container e release
 

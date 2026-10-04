@@ -46,7 +46,7 @@
 <section class="card">
 	<h2>Nuova operazione</h2>
 	{#if data.instruments.length === 0}
-		<p class="muted">Prima <a class="link" href="/admin">aggiungi uno strumento</a> in Amministrazione.</p>
+		<p class="muted">Prima <a class="link" href="/admin/transazioni">aggiungi uno strumento</a> in Amministrazione.</p>
 	{:else}
 		<form method="POST" action="?/create" use:enhance class="tx-form">
 			<label class="field">
@@ -98,7 +98,7 @@
 		{#if data.brokers.length === 0}
 			<p class="muted hint">
 				Nessun broker configurato: puoi aggiungerli (con logo) in
-				<a class="link" href="/admin">Amministrazione</a>.
+				<a class="link" href="/admin/transazioni">Amministrazione</a>.
 			</p>
 		{/if}
 		{#if form?.error}
@@ -111,7 +111,7 @@
 	<div class="sec-head">
 		<h2>Storico ({data.transactions.length})</h2>
 		<div class="sec-actions">
-			<span class="muted">Import CSV in <a class="link" href="/admin">Amministrazione</a></span>
+			<span class="muted">Import CSV in <a class="link" href="/admin/transazioni">Amministrazione</a></span>
 			<a class="btn ghost" href="/api/transactions/export" download>Esporta CSV</a>
 		</div>
 	</div>

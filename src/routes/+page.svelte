@@ -110,7 +110,7 @@
 	<section class="onboarding card">
 		<h1>Benvenuto in Cunti</h1>
 		<p>
-			Per iniziare: <a href="/admin">aggiungi gli strumenti</a> (ETF di Borsa Italiana o crypto),
+			Per iniziare: <a href="/admin/transazioni">aggiungi gli strumenti</a> (ETF di Borsa Italiana o crypto),
 			poi <a href="/transactions">registra i tuoi acquisti</a>. I prezzi si aggiornano da soli ogni 6 ore.
 		</p>
 	</section>
